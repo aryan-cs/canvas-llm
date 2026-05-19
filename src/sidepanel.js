@@ -171,71 +171,79 @@ function updateGrid() {
   }
 }
 
-/* ── Share / Remote Drawing (PeerJS) ── */
-const shareBtn = document.getElementById('tool-share');
-const shareDialog = document.getElementById('share-dialog');
-const shareClose = document.getElementById('share-close');
+/* ── Share / Remote Drawing (PeerJS) — inside settings ── */
 const shareStatus = document.getElementById('share-status');
+const shareStartBtn = document.getElementById('share-start');
+const shareActive = document.getElementById('share-active');
 const shareQrCanvas = document.getElementById('share-qr');
 const shareLinkText = document.getElementById('share-link');
 const shareCopyBtn = document.getElementById('share-copy');
 const shareStopBtn = document.getElementById('share-stop');
 const connectionDot = document.getElementById('connection-dot');
+const shareDot = document.getElementById('share-dot');
 
 let peerHost = null;
 
-shareBtn.onclick = () => {
-  shareDialog.showModal();
+function setDots(cls) {
+  connectionDot.className = 'dot' + (cls ? ' ' + cls : '');
+  shareDot.className = 'dot' + (cls ? ' ' + cls : '');
+}
+
+shareStartBtn.onclick = () => {
   if (!peerHost || peerHost.getState() === 'idle' || peerHost.getState() === 'error') {
     startSharing();
   }
 };
-shareClose.onclick = () => shareDialog.close();
-shareDialog.addEventListener('click', (e) => {
-  if (e.target === shareDialog) shareDialog.close();
-});
 
 shareStopBtn.onclick = () => {
   if (peerHost) { peerHost.stop(); peerHost = null; }
-  connectionDot.className = 'dot';
-  shareQrCanvas.style.display = 'none';
-  shareLinkText.textContent = '';
-  shareCopyBtn.style.display = 'none';
-  shareStopBtn.style.display = 'none';
-  shareStatus.textContent = 'Sharing stopped.';
+  setDots('');
+  shareActive.style.display = 'none';
+  shareStartBtn.style.display = '';
+  shareStatus.textContent = 'Draw from your phone and see it live here.';
 };
 
 async function startSharing() {
   shareStatus.textContent = 'Starting...';
-  shareQrCanvas.style.display = 'none';
-  shareLinkText.textContent = '';
-  shareCopyBtn.style.display = 'none';
-  shareStopBtn.style.display = 'none';
+  shareStartBtn.style.display = 'none';
+  shareActive.style.display = 'none';
 
   peerHost = new PeerHost({
     onStateChange: (state) => {
       switch (state) {
         case 'initializing':
           shareStatus.textContent = 'Starting...';
-          connectionDot.className = 'dot';
+          setDots('');
           break;
         case 'ready':
-          shareStatus.textContent = 'Scan QR code or open link on your phone:';
-          shareStopBtn.style.display = 'inline-block';
-          connectionDot.className = 'dot waiting';
+          shareStatus.textContent = 'Scan QR or open link on your phone:';
+          setDots('waiting');
           renderQR();
           break;
         case 'connected':
-          shareStatus.textContent = 'Phone connected! Waiting for drawing...';
-          connectionDot.className = 'dot connected';
+          shareStatus.textContent = 'Phone connected! Drawing syncs live.';
+          setDots('connected');
           break;
         case 'transferring':
           shareStatus.textContent = 'Receiving drawing...';
           break;
         case 'error':
           shareStatus.textContent = 'Connection error. Try again.';
-          connectionDot.className = 'dot';
+          setDots('');
+          shareActive.style.display = 'none';
+          shareStartBtn.style.display = '';
           break;
+      }
+    },
+    onDrawEvent: (event) => {
+      engine.remoteStroke(event);
+    },
+    onPasteRequest: async () => {
+      try {
+        await pasteImage(engine.toDataURL());
+        setStatus('Remote drawing pasted!', 'success');
+      } catch (e) {
+        setStatus(e.message || 'Failed to paste remote drawing', 'error');
       }
     },
     onImageReceived: async (dataUrl) => {
@@ -255,6 +263,7 @@ async function startSharing() {
     await peerHost.start();
   } catch (e) {
     shareStatus.textContent = 'Failed to start: ' + e.message;
+    shareStartBtn.style.display = '';
   }
 }
 
@@ -263,8 +272,7 @@ function renderQR() {
   if (!url) return;
 
   shareLinkText.textContent = url;
-  shareCopyBtn.style.display = 'inline-block';
-  shareQrCanvas.style.display = 'block';
+  shareActive.style.display = '';
 
   QRCode.toCanvas(shareQrCanvas, url, {
     width: 180,

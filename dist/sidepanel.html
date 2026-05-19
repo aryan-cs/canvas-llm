@@ -214,24 +214,6 @@
       font-size: 11px; color: #888;
       min-width: 18px; text-align: center;
     }
-    /* ── Share dialog ── */
-    #share-dialog {
-      background: #2a2a2a;
-      color: #e0e0e0;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 12px;
-      padding: 0;
-      width: min(280px, calc(100% - 32px));
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      font-family: inherit;
-      font-size: 13px;
-      position: fixed;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      margin: 0;
-    }
-    #share-dialog::backdrop { background: rgba(0,0,0,0.5); }
-
     /* ── Connection dot ── */
     .dot {
       width: 8px; height: 8px;
@@ -242,6 +224,75 @@
     }
     .dot.waiting { background: #f59e0b; }
     .dot.connected { background: #22c55e; }
+
+    /* ── Settings divider ── */
+    .setting-divider {
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+      margin: 2px 0;
+    }
+
+    /* ── Share section (inside settings) ── */
+    #share-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .share-hint {
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+      margin: 0;
+    }
+    .share-btn-primary {
+      width: 100%;
+      padding: 8px 0;
+      border: none; border-radius: 8px;
+      background: rgba(189,193,198,0.25);
+      color: #d4d8dc;
+      font-size: 13px; font-family: inherit;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .share-btn-primary:hover { background: rgba(189,193,198,0.35); }
+    #share-active {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+    #share-qr { border-radius: 8px; }
+    #share-link {
+      font-size: 10px;
+      color: #666;
+      word-break: break-all;
+      text-align: center;
+      max-width: 100%;
+      margin: 0;
+    }
+    .share-btn-row {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+    }
+    .share-btn-half {
+      flex: 1;
+      padding: 7px 0;
+      border: none; border-radius: 6px;
+      font-size: 12px; font-family: inherit;
+      cursor: pointer;
+      background: rgba(189,193,198,0.25);
+      color: #d4d8dc;
+      transition: background .15s;
+    }
+    .share-btn-half:hover { background: rgba(189,193,198,0.35); }
+    .share-btn-half.stop {
+      background: rgba(239,68,68,0.2);
+      color: #ef4444;
+    }
+    .share-btn-half.stop:hover { background: rgba(239,68,68,0.3); }
   </style>
 </head>
 <body>
@@ -289,12 +340,6 @@
           <path d="M2 4h12M2 8h12M2 12h12"/>
         </svg>
       </button>
-      <button id="tool-share" class="btn" title="Share (draw from phone)">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
-          <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
-        </svg>
-      </button>
       <span id="connection-dot" class="dot"></span>
     </div>
 
@@ -322,22 +367,28 @@
             <span id="grid-size-val">50</span>
           </div>
         </div>
+
+        <div class="setting-divider"></div>
+
+        <div class="setting-row">
+          <span class="setting-label">Remote Draw</span>
+          <span id="share-dot" class="dot"></span>
+        </div>
+        <div id="share-section">
+          <p id="share-status" class="share-hint">Draw from your phone and see it live here.</p>
+          <button id="share-start" type="button" class="share-btn-primary">Start Sharing</button>
+          <div id="share-active" style="display:none;">
+            <canvas id="share-qr"></canvas>
+            <p id="share-link"></p>
+            <div class="share-btn-row">
+              <button id="share-copy" type="button" class="share-btn-half">Copy Link</button>
+              <button id="share-stop" type="button" class="share-btn-half stop">Stop</button>
+            </div>
+          </div>
+        </div>
       </div>
     </dialog>
 
-    <dialog id="share-dialog">
-      <div class="dialog-header">
-        <h3>Remote Draw</h3>
-        <button class="dialog-close" id="share-close">&times;</button>
-      </div>
-      <div class="dialog-body" style="align-items:center;">
-        <p id="share-status" style="font-size:12px;color:#999;text-align:center;"></p>
-        <canvas id="share-qr" style="display:none;border-radius:8px;"></canvas>
-        <p id="share-link" style="font-size:10px;color:#666;word-break:break-all;text-align:center;max-width:100%;"></p>
-        <button id="share-copy" type="button" style="display:none;padding:6px 16px;border:none;border-radius:6px;background:rgba(189,193,198,0.25);color:#d4d8dc;cursor:pointer;font-size:12px;font-family:inherit;">Copy Link</button>
-        <button id="share-stop" type="button" style="display:none;padding:6px 16px;border:none;border-radius:6px;background:rgba(239,68,68,0.2);color:#ef4444;cursor:pointer;font-size:12px;font-family:inherit;">Stop Sharing</button>
-      </div>
-    </dialog>
 
     <div id="canvas-wrap">
       <canvas id="drawing-canvas"></canvas>

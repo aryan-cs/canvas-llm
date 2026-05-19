@@ -2732,10 +2732,12 @@
       this.background = opts.background || "#ffffff";
       this.onHistoryChange = opts.onHistoryChange || (() => {
       });
+      this.onDrawEvent = opts.onDrawEvent || null;
       this._isDrawing = false;
       this._lastPt = null;
       this._undoStack = [];
       this._undoIdx = -1;
+      this._remoteLast = null;
       this._onDown = this._onDown.bind(this);
       this._onMove = this._onMove.bind(this);
       this._onUp = this._onUp.bind(this);
@@ -2856,6 +2858,72 @@
     toBlob() {
       return new Promise((resolve) => this.canvas.toBlob(resolve, "image/png"));
     }
+    /* ── Remote stroke replay ── */
+    remoteStroke(event) {
+      const r = this.container.getBoundingClientRect();
+      const { ctx } = this;
+      switch (event.type) {
+        case "stroke-start": {
+          const x = event.nx * r.width;
+          const y = event.ny * r.height;
+          const prevOp = ctx.globalCompositeOperation;
+          const prevStroke = ctx.strokeStyle;
+          const prevWidth = ctx.lineWidth;
+          const prevCap = ctx.lineCap;
+          const prevJoin = ctx.lineJoin;
+          ctx.globalCompositeOperation = event.tool === "erase" ? "destination-out" : "source-over";
+          ctx.strokeStyle = event.color;
+          ctx.lineWidth = event.brushSize;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + 0.1, y + 0.1);
+          ctx.stroke();
+          ctx.globalCompositeOperation = prevOp;
+          ctx.strokeStyle = prevStroke;
+          ctx.lineWidth = prevWidth;
+          ctx.lineCap = prevCap;
+          ctx.lineJoin = prevJoin;
+          this._remoteLast = { x, y, tool: event.tool, color: event.color, brushSize: event.brushSize };
+          break;
+        }
+        case "stroke-move": {
+          if (!this._remoteLast) break;
+          const x = event.nx * r.width;
+          const y = event.ny * r.height;
+          const prevOp = ctx.globalCompositeOperation;
+          const prevStroke = ctx.strokeStyle;
+          const prevWidth = ctx.lineWidth;
+          const prevCap = ctx.lineCap;
+          const prevJoin = ctx.lineJoin;
+          ctx.globalCompositeOperation = this._remoteLast.tool === "erase" ? "destination-out" : "source-over";
+          ctx.strokeStyle = this._remoteLast.color;
+          ctx.lineWidth = this._remoteLast.brushSize;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(this._remoteLast.x, this._remoteLast.y);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          ctx.globalCompositeOperation = prevOp;
+          ctx.strokeStyle = prevStroke;
+          ctx.lineWidth = prevWidth;
+          ctx.lineCap = prevCap;
+          ctx.lineJoin = prevJoin;
+          this._remoteLast.x = x;
+          this._remoteLast.y = y;
+          break;
+        }
+        case "stroke-end":
+          this._remoteLast = null;
+          this.pushUndo();
+          break;
+        case "clear":
+          this.clear();
+          break;
+      }
+    }
     /* ── Pointer handlers ── */
     _pt(e) {
       const r = this.canvas.getBoundingClientRect();
@@ -2878,11 +2946,23 @@
       ctx.moveTo(p.x, p.y);
       ctx.lineTo(p.x + 0.1, p.y + 0.1);
       ctx.stroke();
+      if (this.onDrawEvent) {
+        const r = this.container.getBoundingClientRect();
+        this.onDrawEvent({
+          type: "stroke-start",
+          nx: p.x / r.width,
+          ny: p.y / r.height,
+          tool: this.tool,
+          color: this.color,
+          brushSize: this.brushSize
+        });
+      }
     }
     _onMove(e) {
       if (!this._isDrawing) return;
       e.preventDefault();
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
       for (const ev of evts) {
         const p = this._pt(ev);
         this.ctx.beginPath();
@@ -2890,6 +2970,13 @@
         this.ctx.lineTo(p.x, p.y);
         this.ctx.stroke();
         this._lastPt = p;
+        if (this.onDrawEvent && r) {
+          this.onDrawEvent({
+            type: "stroke-move",
+            nx: p.x / r.width,
+            ny: p.y / r.height
+          });
+        }
       }
     }
     _onUp(e) {
@@ -2899,6 +2986,9 @@
       this.canvas.releasePointerCapture(e.pointerId);
       this.ctx.globalCompositeOperation = "source-over";
       this.pushUndo();
+      if (this.onDrawEvent) {
+        this.onDrawEvent({ type: "stroke-end" });
+      }
     }
     /* ── Cleanup ── */
     destroy() {
@@ -6955,6 +7045,10 @@
       });
       this.onImageReceived = opts.onImageReceived || (() => {
       });
+      this.onDrawEvent = opts.onDrawEvent || (() => {
+      });
+      this.onPasteRequest = opts.onPasteRequest || (() => {
+      });
       this.onError = opts.onError || (() => {
       });
       this._peer = null;
@@ -7001,6 +7095,14 @@
                 } catch {
                 }
               });
+            } else if (msg && msg.type === "draw" && msg.event) {
+              this.onDrawEvent(msg.event);
+            } else if (msg && msg.type === "paste") {
+              this.onPasteRequest();
+              try {
+                conn.send({ type: "paste-ack" });
+              } catch {
+              }
             } else if (msg && msg.type === "hello") {
               try {
                 conn.send({ type: "welcome" });
@@ -7213,68 +7315,75 @@
       gridOverlay.style.display = "none";
     }
   }
-  var shareBtn = document.getElementById("tool-share");
-  var shareDialog = document.getElementById("share-dialog");
-  var shareClose = document.getElementById("share-close");
   var shareStatus = document.getElementById("share-status");
+  var shareStartBtn = document.getElementById("share-start");
+  var shareActive = document.getElementById("share-active");
   var shareQrCanvas = document.getElementById("share-qr");
   var shareLinkText = document.getElementById("share-link");
   var shareCopyBtn = document.getElementById("share-copy");
   var shareStopBtn = document.getElementById("share-stop");
   var connectionDot = document.getElementById("connection-dot");
+  var shareDot = document.getElementById("share-dot");
   var peerHost = null;
-  shareBtn.onclick = () => {
-    shareDialog.showModal();
+  function setDots(cls) {
+    connectionDot.className = "dot" + (cls ? " " + cls : "");
+    shareDot.className = "dot" + (cls ? " " + cls : "");
+  }
+  shareStartBtn.onclick = () => {
     if (!peerHost || peerHost.getState() === "idle" || peerHost.getState() === "error") {
       startSharing();
     }
   };
-  shareClose.onclick = () => shareDialog.close();
-  shareDialog.addEventListener("click", (e) => {
-    if (e.target === shareDialog) shareDialog.close();
-  });
   shareStopBtn.onclick = () => {
     if (peerHost) {
       peerHost.stop();
       peerHost = null;
     }
-    connectionDot.className = "dot";
-    shareQrCanvas.style.display = "none";
-    shareLinkText.textContent = "";
-    shareCopyBtn.style.display = "none";
-    shareStopBtn.style.display = "none";
-    shareStatus.textContent = "Sharing stopped.";
+    setDots("");
+    shareActive.style.display = "none";
+    shareStartBtn.style.display = "";
+    shareStatus.textContent = "Draw from your phone and see it live here.";
   };
   async function startSharing() {
     shareStatus.textContent = "Starting...";
-    shareQrCanvas.style.display = "none";
-    shareLinkText.textContent = "";
-    shareCopyBtn.style.display = "none";
-    shareStopBtn.style.display = "none";
+    shareStartBtn.style.display = "none";
+    shareActive.style.display = "none";
     peerHost = new PeerHost({
       onStateChange: (state) => {
         switch (state) {
           case "initializing":
             shareStatus.textContent = "Starting...";
-            connectionDot.className = "dot";
+            setDots("");
             break;
           case "ready":
-            shareStatus.textContent = "Scan QR code or open link on your phone:";
-            shareStopBtn.style.display = "inline-block";
-            connectionDot.className = "dot waiting";
+            shareStatus.textContent = "Scan QR or open link on your phone:";
+            setDots("waiting");
             renderQR();
             break;
           case "connected":
-            shareStatus.textContent = "Phone connected! Waiting for drawing...";
-            connectionDot.className = "dot connected";
+            shareStatus.textContent = "Phone connected! Drawing syncs live.";
+            setDots("connected");
             break;
           case "transferring":
             shareStatus.textContent = "Receiving drawing...";
             break;
           case "error":
             shareStatus.textContent = "Connection error. Try again.";
-            connectionDot.className = "dot";
+            setDots("");
+            shareActive.style.display = "none";
+            shareStartBtn.style.display = "";
             break;
+        }
+      },
+      onDrawEvent: (event) => {
+        engine.remoteStroke(event);
+      },
+      onPasteRequest: async () => {
+        try {
+          await pasteImage(engine.toDataURL());
+          setStatus("Remote drawing pasted!", "success");
+        } catch (e) {
+          setStatus(e.message || "Failed to paste remote drawing", "error");
         }
       },
       onImageReceived: async (dataUrl) => {
@@ -7293,14 +7402,14 @@
       await peerHost.start();
     } catch (e) {
       shareStatus.textContent = "Failed to start: " + e.message;
+      shareStartBtn.style.display = "";
     }
   }
   function renderQR() {
     const url = peerHost.getShareUrl();
     if (!url) return;
     shareLinkText.textContent = url;
-    shareCopyBtn.style.display = "inline-block";
-    shareQrCanvas.style.display = "block";
+    shareActive.style.display = "";
     import_qrcode.default.toCanvas(shareQrCanvas, url, {
       width: 180,
       margin: 2,

@@ -5,6 +5,8 @@ export class PeerHost {
   constructor(opts = {}) {
     this.onStateChange = opts.onStateChange || (() => {});
     this.onImageReceived = opts.onImageReceived || (() => {});
+    this.onDrawEvent = opts.onDrawEvent || (() => {});
+    this.onPasteRequest = opts.onPasteRequest || (() => {});
     this.onError = opts.onError || (() => {});
 
     this._peer = null;
@@ -48,13 +50,16 @@ export class PeerHost {
         conn.on('data', (msg) => {
           if (msg && msg.type === 'image' && msg.data) {
             this._setState('transferring');
-            // Convert blob/arraybuffer to data URL
             this._blobToDataUrl(msg.data).then((dataUrl) => {
               this.onImageReceived(dataUrl);
               this._setState('connected');
-              // Send ack
               try { conn.send({ type: 'image-ack' }); } catch {}
             });
+          } else if (msg && msg.type === 'draw' && msg.event) {
+            this.onDrawEvent(msg.event);
+          } else if (msg && msg.type === 'paste') {
+            this.onPasteRequest();
+            try { conn.send({ type: 'paste-ack' }); } catch {}
           } else if (msg && msg.type === 'hello') {
             try { conn.send({ type: 'welcome' }); } catch {}
           }

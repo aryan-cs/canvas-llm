@@ -30,9 +30,17 @@ const colorPicker = document.getElementById('color-picker');
 const slider = document.getElementById('radius-slider');
 const sliderVal = document.getElementById('radius-val');
 
+/* ── PeerJS connection (declared early so engine callback can use it) ── */
+let peer = null;
+
 /* ── Drawing engine ── */
 const engine = new DrawingEngine(canvas, container, {
   onHistoryChange: updateUndoRedo,
+  onDrawEvent: (event) => {
+    if (peer && peer.getState() === 'connected') {
+      peer.sendDrawEvent(event);
+    }
+  },
 });
 
 function updateUndoRedo() {
@@ -68,9 +76,7 @@ document.addEventListener('touchmove', (e) => {
   }
 }, { passive: false });
 
-/* ── PeerJS connection ── */
-let peer = null;
-
+/* ── Connection ── */
 function setStatus(state, text) {
   statusDot.className = 'status-dot ' + state;
   statusText.textContent = text;
@@ -88,7 +94,7 @@ async function connectToPeer() {
           setStatus('connecting', 'Connecting...');
           break;
         case 'connected':
-          setStatus('connected', 'Connected');
+          setStatus('connected', 'Connected — draw and tap Send');
           sendBtn.disabled = false;
           break;
         case 'sending':
@@ -108,6 +114,10 @@ async function connectToPeer() {
       setStatus('connected', 'Sent! Draw another or close this page.');
       sendBtn.disabled = false;
     },
+    onPasteAck: () => {
+      setStatus('connected', 'Pasted into chat!');
+      sendBtn.disabled = false;
+    },
     onError: (err) => {
       console.error('PeerRemote error:', err);
     },
@@ -123,18 +133,16 @@ async function connectToPeer() {
   }
 }
 
-/* ── Send drawing ── */
+/* ── Send = paste to chat on the Mac ── */
 sendBtn.onclick = async () => {
   if (!peer || peer.getState() !== 'connected') return;
   sendBtn.disabled = true;
-  setStatus('connected', 'Sending...');
+  setStatus('connected', 'Pasting to chat...');
 
   try {
-    const blob = await engine.toBlob();
-    await peer.sendImage(blob);
-    setStatus('connected', 'Sent! Waiting for confirmation...');
+    peer.requestPaste();
   } catch (e) {
-    setStatus('error', 'Failed to send: ' + e.message);
+    setStatus('error', 'Failed: ' + e.message);
     sendBtn.disabled = false;
   }
 };

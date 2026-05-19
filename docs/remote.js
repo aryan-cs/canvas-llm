@@ -654,10 +654,12 @@
       this.background = opts.background || "#ffffff";
       this.onHistoryChange = opts.onHistoryChange || (() => {
       });
+      this.onDrawEvent = opts.onDrawEvent || null;
       this._isDrawing = false;
       this._lastPt = null;
       this._undoStack = [];
       this._undoIdx = -1;
+      this._remoteLast = null;
       this._onDown = this._onDown.bind(this);
       this._onMove = this._onMove.bind(this);
       this._onUp = this._onUp.bind(this);
@@ -778,6 +780,72 @@
     toBlob() {
       return new Promise((resolve) => this.canvas.toBlob(resolve, "image/png"));
     }
+    /* ── Remote stroke replay ── */
+    remoteStroke(event) {
+      const r = this.container.getBoundingClientRect();
+      const { ctx } = this;
+      switch (event.type) {
+        case "stroke-start": {
+          const x = event.nx * r.width;
+          const y = event.ny * r.height;
+          const prevOp = ctx.globalCompositeOperation;
+          const prevStroke = ctx.strokeStyle;
+          const prevWidth = ctx.lineWidth;
+          const prevCap = ctx.lineCap;
+          const prevJoin = ctx.lineJoin;
+          ctx.globalCompositeOperation = event.tool === "erase" ? "destination-out" : "source-over";
+          ctx.strokeStyle = event.color;
+          ctx.lineWidth = event.brushSize;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + 0.1, y + 0.1);
+          ctx.stroke();
+          ctx.globalCompositeOperation = prevOp;
+          ctx.strokeStyle = prevStroke;
+          ctx.lineWidth = prevWidth;
+          ctx.lineCap = prevCap;
+          ctx.lineJoin = prevJoin;
+          this._remoteLast = { x, y, tool: event.tool, color: event.color, brushSize: event.brushSize };
+          break;
+        }
+        case "stroke-move": {
+          if (!this._remoteLast) break;
+          const x = event.nx * r.width;
+          const y = event.ny * r.height;
+          const prevOp = ctx.globalCompositeOperation;
+          const prevStroke = ctx.strokeStyle;
+          const prevWidth = ctx.lineWidth;
+          const prevCap = ctx.lineCap;
+          const prevJoin = ctx.lineJoin;
+          ctx.globalCompositeOperation = this._remoteLast.tool === "erase" ? "destination-out" : "source-over";
+          ctx.strokeStyle = this._remoteLast.color;
+          ctx.lineWidth = this._remoteLast.brushSize;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(this._remoteLast.x, this._remoteLast.y);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          ctx.globalCompositeOperation = prevOp;
+          ctx.strokeStyle = prevStroke;
+          ctx.lineWidth = prevWidth;
+          ctx.lineCap = prevCap;
+          ctx.lineJoin = prevJoin;
+          this._remoteLast.x = x;
+          this._remoteLast.y = y;
+          break;
+        }
+        case "stroke-end":
+          this._remoteLast = null;
+          this.pushUndo();
+          break;
+        case "clear":
+          this.clear();
+          break;
+      }
+    }
     /* ── Pointer handlers ── */
     _pt(e) {
       const r = this.canvas.getBoundingClientRect();
@@ -800,11 +868,23 @@
       ctx.moveTo(p.x, p.y);
       ctx.lineTo(p.x + 0.1, p.y + 0.1);
       ctx.stroke();
+      if (this.onDrawEvent) {
+        const r = this.container.getBoundingClientRect();
+        this.onDrawEvent({
+          type: "stroke-start",
+          nx: p.x / r.width,
+          ny: p.y / r.height,
+          tool: this.tool,
+          color: this.color,
+          brushSize: this.brushSize
+        });
+      }
     }
     _onMove(e) {
       if (!this._isDrawing) return;
       e.preventDefault();
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
       for (const ev of evts) {
         const p = this._pt(ev);
         this.ctx.beginPath();
@@ -812,6 +892,13 @@
         this.ctx.lineTo(p.x, p.y);
         this.ctx.stroke();
         this._lastPt = p;
+        if (this.onDrawEvent && r) {
+          this.onDrawEvent({
+            type: "stroke-move",
+            nx: p.x / r.width,
+            ny: p.y / r.height
+          });
+        }
       }
     }
     _onUp(e) {
@@ -821,6 +908,9 @@
       this.canvas.releasePointerCapture(e.pointerId);
       this.ctx.globalCompositeOperation = "source-over";
       this.pushUndo();
+      if (this.onDrawEvent) {
+        this.onDrawEvent({ type: "stroke-end" });
+      }
     }
     /* ── Cleanup ── */
     destroy() {
@@ -4880,6 +4970,8 @@
       });
       this.onAck = opts.onAck || (() => {
       });
+      this.onPasteAck = opts.onPasteAck || (() => {
+      });
       this._peer = null;
       this._conn = null;
       this._state = "idle";
@@ -4905,6 +4997,8 @@
           this._conn.on("data", (msg) => {
             if (msg && msg.type === "image-ack") {
               this.onAck();
+            } else if (msg && msg.type === "paste-ack") {
+              this.onPasteAck();
             }
           });
           this._conn.on("close", () => {
@@ -4930,6 +5024,16 @@
           }
         }, 15e3);
       });
+    }
+    sendDrawEvent(event) {
+      if (!this._conn || this._conn.open === false) return;
+      this._conn.send({ type: "draw", event });
+    }
+    requestPaste() {
+      if (!this._conn || this._conn.open === false) {
+        throw new Error("Not connected");
+      }
+      this._conn.send({ type: "paste" });
     }
     async sendImage(blob) {
       if (!this._conn || this._conn.open === false) {
@@ -4977,8 +5081,14 @@
   var colorPicker = document.getElementById("color-picker");
   var slider = document.getElementById("radius-slider");
   var sliderVal = document.getElementById("radius-val");
+  var peer = null;
   var engine = new DrawingEngine(canvas, container, {
-    onHistoryChange: updateUndoRedo
+    onHistoryChange: updateUndoRedo,
+    onDrawEvent: (event) => {
+      if (peer && peer.getState() === "connected") {
+        peer.sendDrawEvent(event);
+      }
+    }
   });
   function updateUndoRedo() {
     undoBtn.disabled = !engine.canUndo();
@@ -5006,7 +5116,6 @@
       e.preventDefault();
     }
   }, { passive: false });
-  var peer = null;
   function setStatus(state, text) {
     statusDot.className = "status-dot " + state;
     statusText.textContent = text;
@@ -5021,7 +5130,7 @@
             setStatus("connecting", "Connecting...");
             break;
           case "connected":
-            setStatus("connected", "Connected");
+            setStatus("connected", "Connected \u2014 draw and tap Send");
             sendBtn.disabled = false;
             break;
           case "sending":
@@ -5041,6 +5150,10 @@
         setStatus("connected", "Sent! Draw another or close this page.");
         sendBtn.disabled = false;
       },
+      onPasteAck: () => {
+        setStatus("connected", "Pasted into chat!");
+        sendBtn.disabled = false;
+      },
       onError: (err) => {
         console.error("PeerRemote error:", err);
       }
@@ -5057,13 +5170,11 @@
   sendBtn.onclick = async () => {
     if (!peer || peer.getState() !== "connected") return;
     sendBtn.disabled = true;
-    setStatus("connected", "Sending...");
+    setStatus("connected", "Pasting to chat...");
     try {
-      const blob = await engine.toBlob();
-      await peer.sendImage(blob);
-      setStatus("connected", "Sent! Waiting for confirmation...");
+      peer.requestPaste();
     } catch (e) {
-      setStatus("error", "Failed to send: " + e.message);
+      setStatus("error", "Failed: " + e.message);
       sendBtn.disabled = false;
     }
   };

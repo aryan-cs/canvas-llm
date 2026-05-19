@@ -7,6 +7,7 @@ export class PeerRemote {
     this.onStateChange = opts.onStateChange || (() => {});
     this.onError = opts.onError || (() => {});
     this.onAck = opts.onAck || (() => {});
+    this.onPasteAck = opts.onPasteAck || (() => {});
 
     this._peer = null;
     this._conn = null;
@@ -39,6 +40,8 @@ export class PeerRemote {
         this._conn.on('data', (msg) => {
           if (msg && msg.type === 'image-ack') {
             this.onAck();
+          } else if (msg && msg.type === 'paste-ack') {
+            this.onPasteAck();
           }
         });
 
@@ -71,12 +74,23 @@ export class PeerRemote {
     });
   }
 
+  sendDrawEvent(event) {
+    if (!this._conn || this._conn.open === false) return;
+    this._conn.send({ type: 'draw', event });
+  }
+
+  requestPaste() {
+    if (!this._conn || this._conn.open === false) {
+      throw new Error('Not connected');
+    }
+    this._conn.send({ type: 'paste' });
+  }
+
   async sendImage(blob) {
     if (!this._conn || this._conn.open === false) {
       throw new Error('Not connected');
     }
     this._setState('sending');
-    // Convert blob to ArrayBuffer for reliable transfer
     const buf = await blob.arrayBuffer();
     this._conn.send({ type: 'image', data: buf });
     this._setState('connected');

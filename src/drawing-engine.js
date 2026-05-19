@@ -12,11 +12,13 @@ export class DrawingEngine {
     this.brushSize = 3;
     this.background = opts.background || '#ffffff';
     this.onHistoryChange = opts.onHistoryChange || (() => {});
+    this.onDrawEvent = opts.onDrawEvent || null;
 
     this._isDrawing = false;
     this._lastPt = null;
     this._undoStack = [];
     this._undoIdx = -1;
+    this._remoteLast = null;
 
     // Bind pointer handlers
     this._onDown = this._onDown.bind(this);
@@ -127,6 +129,74 @@ export class DrawingEngine {
   toDataURL() { return this.canvas.toDataURL('image/png'); }
   toBlob() { return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png')); }
 
+  /* ── Remote stroke replay ── */
+  remoteStroke(event) {
+    const r = this.container.getBoundingClientRect();
+    const { ctx } = this;
+
+    switch (event.type) {
+      case 'stroke-start': {
+        const x = event.nx * r.width;
+        const y = event.ny * r.height;
+        const prevOp = ctx.globalCompositeOperation;
+        const prevStroke = ctx.strokeStyle;
+        const prevWidth = ctx.lineWidth;
+        const prevCap = ctx.lineCap;
+        const prevJoin = ctx.lineJoin;
+        ctx.globalCompositeOperation = event.tool === 'erase' ? 'destination-out' : 'source-over';
+        ctx.strokeStyle = event.color;
+        ctx.lineWidth = event.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 0.1, y + 0.1);
+        ctx.stroke();
+        ctx.globalCompositeOperation = prevOp;
+        ctx.strokeStyle = prevStroke;
+        ctx.lineWidth = prevWidth;
+        ctx.lineCap = prevCap;
+        ctx.lineJoin = prevJoin;
+        this._remoteLast = { x, y, tool: event.tool, color: event.color, brushSize: event.brushSize };
+        break;
+      }
+      case 'stroke-move': {
+        if (!this._remoteLast) break;
+        const x = event.nx * r.width;
+        const y = event.ny * r.height;
+        const prevOp = ctx.globalCompositeOperation;
+        const prevStroke = ctx.strokeStyle;
+        const prevWidth = ctx.lineWidth;
+        const prevCap = ctx.lineCap;
+        const prevJoin = ctx.lineJoin;
+        ctx.globalCompositeOperation = this._remoteLast.tool === 'erase' ? 'destination-out' : 'source-over';
+        ctx.strokeStyle = this._remoteLast.color;
+        ctx.lineWidth = this._remoteLast.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(this._remoteLast.x, this._remoteLast.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.globalCompositeOperation = prevOp;
+        ctx.strokeStyle = prevStroke;
+        ctx.lineWidth = prevWidth;
+        ctx.lineCap = prevCap;
+        ctx.lineJoin = prevJoin;
+        this._remoteLast.x = x;
+        this._remoteLast.y = y;
+        break;
+      }
+      case 'stroke-end':
+        this._remoteLast = null;
+        this.pushUndo();
+        break;
+      case 'clear':
+        this.clear();
+        break;
+    }
+  }
+
   /* ── Pointer handlers ── */
   _pt(e) {
     const r = this.canvas.getBoundingClientRect();
@@ -152,12 +222,25 @@ export class DrawingEngine {
     ctx.moveTo(p.x, p.y);
     ctx.lineTo(p.x + 0.1, p.y + 0.1);
     ctx.stroke();
+
+    if (this.onDrawEvent) {
+      const r = this.container.getBoundingClientRect();
+      this.onDrawEvent({
+        type: 'stroke-start',
+        nx: p.x / r.width,
+        ny: p.y / r.height,
+        tool: this.tool,
+        color: this.color,
+        brushSize: this.brushSize,
+      });
+    }
   }
 
   _onMove(e) {
     if (!this._isDrawing) return;
     e.preventDefault();
     const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
     for (const ev of evts) {
       const p = this._pt(ev);
       this.ctx.beginPath();
@@ -165,6 +248,14 @@ export class DrawingEngine {
       this.ctx.lineTo(p.x, p.y);
       this.ctx.stroke();
       this._lastPt = p;
+
+      if (this.onDrawEvent && r) {
+        this.onDrawEvent({
+          type: 'stroke-move',
+          nx: p.x / r.width,
+          ny: p.y / r.height,
+        });
+      }
     }
   }
 
@@ -175,6 +266,10 @@ export class DrawingEngine {
     this.canvas.releasePointerCapture(e.pointerId);
     this.ctx.globalCompositeOperation = 'source-over';
     this.pushUndo();
+
+    if (this.onDrawEvent) {
+      this.onDrawEvent({ type: 'stroke-end' });
+    }
   }
 
   /* ── Cleanup ── */
