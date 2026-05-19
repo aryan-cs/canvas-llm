@@ -76,24 +76,63 @@
       if (btn.getAttribute("aria-disabled") === "true") return false;
       return true;
     }
+    function isUploadInProgress() {
+      if (document.querySelector('[role="progressbar"]')) return true;
+      if (document.querySelector("mat-progress-spinner, mat-progress-bar")) return true;
+      if (document.querySelector('[aria-label*="uploading" i], [aria-label*="loading" i]')) return true;
+      return false;
+    }
     function waitForEnabled(getBtn, maxMs) {
       return new Promise((resolve, reject) => {
         const start = Date.now();
         setTimeout(function poll() {
           const btn = getBtn();
-          if (isEnabled(btn)) {
-            resolve(btn);
+          if (isEnabled(btn) && !isUploadInProgress()) {
+            setTimeout(() => {
+              const btn2 = getBtn();
+              if (isEnabled(btn2) && !isUploadInProgress()) {
+                resolve(btn2);
+                return;
+              }
+              if (Date.now() - start > maxMs) {
+                reject(new Error("Image upload timed out"));
+                return;
+              }
+              setTimeout(poll, 150);
+            }, 400);
             return;
           }
           if (Date.now() - start > maxMs) {
             reject(new Error("Image upload timed out \u2014 send button never enabled"));
             return;
           }
-          setTimeout(poll, 100);
-        }, 250);
+          setTimeout(poll, 150);
+        }, 400);
       });
     }
     function geminiPaste(file) {
+      const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+      const imageInput = fileInputs.find((i) => {
+        const accept = (i.accept || "").toLowerCase();
+        return accept.includes("image") || accept.includes("*") || !accept;
+      }) || fileInputs[0];
+      if (imageInput) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        imageInput.files = dt.files;
+        imageInput.dispatchEvent(new Event("change", { bubbles: true }));
+        return { success: true };
+      }
+      const dropzone = document.querySelector(".xap-uploader-dropzone") || document.querySelector('[class*="dropzone" i]') || document.querySelector('.ql-editor[contenteditable="true"]');
+      if (dropzone) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        const dragOpts = { bubbles: true, cancelable: true, dataTransfer: dt };
+        dropzone.dispatchEvent(new DragEvent("dragenter", dragOpts));
+        dropzone.dispatchEvent(new DragEvent("dragover", dragOpts));
+        dropzone.dispatchEvent(new DragEvent("drop", dragOpts));
+        return { success: true };
+      }
       const editor = document.querySelector('.ql-editor[contenteditable="true"]') || document.querySelector('div[contenteditable="true"][role="textbox"]') || document.querySelector('[contenteditable="true"]');
       if (editor) {
         editor.focus();

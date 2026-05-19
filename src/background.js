@@ -101,24 +101,76 @@ async function pasteImageInPage(imageDataUrl, submit) {
     return true;
   }
 
+  function isUploadInProgress() {
+    // Common upload-in-progress indicators across chat sites
+    if (document.querySelector('[role="progressbar"]')) return true;
+    if (document.querySelector('mat-progress-spinner, mat-progress-bar')) return true;
+    if (document.querySelector('[aria-label*="uploading" i], [aria-label*="loading" i]')) return true;
+    return false;
+  }
+
   function waitForEnabled(getBtn, maxMs) {
     return new Promise((resolve, reject) => {
       const start = Date.now();
-      // Small initial delay to let the disabled state apply after paste
+      // Initial delay so the disabled state / upload indicator can appear
       setTimeout(function poll() {
         const btn = getBtn();
-        if (isEnabled(btn)) { resolve(btn); return; }
+        if (isEnabled(btn) && !isUploadInProgress()) {
+          // Hold for a brief stable window — confirms the upload really
+          // settled (not just a momentary gap between progress indicators)
+          setTimeout(() => {
+            const btn2 = getBtn();
+            if (isEnabled(btn2) && !isUploadInProgress()) { resolve(btn2); return; }
+            // Still uploading — keep polling
+            if (Date.now() - start > maxMs) {
+              reject(new Error('Image upload timed out'));
+              return;
+            }
+            setTimeout(poll, 150);
+          }, 400);
+          return;
+        }
         if (Date.now() - start > maxMs) {
           reject(new Error('Image upload timed out — send button never enabled'));
           return;
         }
-        setTimeout(poll, 100);
-      }, 250);
+        setTimeout(poll, 150);
+      }, 400);
     });
   }
 
   function geminiPaste(file) {
-    // Paste on the Quill editor (most reliable)
+    // Strategy 1: file input (most reliable — triggers Gemini's real upload flow)
+    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+    // Prefer inputs that accept images
+    const imageInput = fileInputs.find(i => {
+      const accept = (i.accept || '').toLowerCase();
+      return accept.includes('image') || accept.includes('*') || !accept;
+    }) || fileInputs[0];
+    if (imageInput) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      imageInput.files = dt.files;
+      imageInput.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true };
+    }
+
+    // Strategy 2: synthetic drag/drop on a dropzone
+    const dropzone =
+      document.querySelector('.xap-uploader-dropzone') ||
+      document.querySelector('[class*="dropzone" i]') ||
+      document.querySelector('.ql-editor[contenteditable="true"]');
+    if (dropzone) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const dragOpts = { bubbles: true, cancelable: true, dataTransfer: dt };
+      dropzone.dispatchEvent(new DragEvent('dragenter', dragOpts));
+      dropzone.dispatchEvent(new DragEvent('dragover', dragOpts));
+      dropzone.dispatchEvent(new DragEvent('drop', dragOpts));
+      return { success: true };
+    }
+
+    // Strategy 3: clipboard paste on editor (last resort)
     const editor =
       document.querySelector('.ql-editor[contenteditable="true"]') ||
       document.querySelector('div[contenteditable="true"][role="textbox"]') ||
