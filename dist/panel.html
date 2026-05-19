@@ -1,0 +1,75 @@
+<div id="canvas-panel">
+  <div id="canvas-toolbar">
+    <button id="tool-draw" class="tool-btn active" title="Draw (D)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M2.5 13.5l1-4L11 2l2.5 2.5-7.5 7.5-4 1z"/>
+        <path d="M9.5 3.5l2.5 2.5"/>
+      </svg>
+    </button>
+    <button id="tool-fill" class="tool-btn" title="Fill (F)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 11l4-8 4 8H3z"/>
+        <path d="M12 10c1 1.5 2 2 2 3a2 2 0 01-4 0c0-1 1-1.5 2-3z" fill="currentColor"/>
+      </svg>
+    </button>
+    <button id="tool-erase" class="tool-btn" title="Eraser (E)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M6 14h7M3.5 11.5l7-7 3 3-7 7-3.5.5.5-3.5z"/>
+      </svg>
+    </button>
+
+    <div class="separator"></div>
+
+    <button id="tool-undo" class="tool-btn" title="Undo (Ctrl+Z)" disabled>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 7h7a3 3 0 010 6H8"/>
+        <path d="M6 4L3 7l3 3"/>
+      </svg>
+    </button>
+    <button id="tool-redo" class="tool-btn" title="Redo (Ctrl+Shift+Z)" disabled>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M13 7H6a3 3 0 000 6h2"/>
+        <path d="M10 4l3 3-3 3"/>
+      </svg>
+    </button>
+
+    <div class="separator"></div>
+
+    <input type="color" id="color-picker" value="#000000" title="Color">
+    <div class="radius-control">
+      <input type="range" id="radius-slider" min="1" max="40" value="3" title="Brush size">
+      <span id="radius-value">3</span>
+    </div>
+
+    <div class="toolbar-spacer"></div>
+
+    <button id="tool-clear" class="tool-btn" title="Clear canvas">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 9h8l1-9"/>
+      </svg>
+    </button>
+    <button id="tool-position" class="tool-btn" title="Switch side">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M4 3l-3 3 3 3M12 7l3 3-3 3M1 6h14M15 10H1"/>
+      </svg>
+    </button>
+  </div>
+
+  <div id="canvas-container">
+    <canvas id="drawing-canvas"></canvas>
+    <div id="cursor-preview"></div>
+  </div>
+
+  <div id="attach-bar">
+    <div id="status-message"></div>
+    <button id="attach-btn" title="Paste drawing into chat input">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M14 10v3a1 1 0 01-1 1H3a1 1 0 01-1-1v-3"/>
+        <path d="M8 2v8M5 7l3 3 3-3"/>
+      </svg>
+      <span>Paste to Chat</span>
+    </button>
+  </div>
+
+  <div id="resize-handle"></div>
+</div>

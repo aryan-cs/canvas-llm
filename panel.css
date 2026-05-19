@@ -1,0 +1,264 @@
+:host {
+  all: initial;
+  position: fixed;
+  top: 0;
+  height: 100vh;
+  z-index: 2147483647;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #e0e0e0;
+  box-sizing: border-box;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#canvas-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: #1e1e1e;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+:host(.panel-left) #canvas-panel {
+  border-left: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ── Toolbar: single flat row ── */
+#canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  background: #252525;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  height: 38px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+#canvas-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.separator {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+.toolbar-spacer {
+  flex: 1;
+  min-width: 4px;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tool-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ddd;
+}
+
+.tool-btn.active {
+  background: rgba(99, 102, 241, 0.3);
+  color: #818cf8;
+}
+
+.tool-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+#color-picker {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+  flex-shrink: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#color-picker::-webkit-color-swatch-wrapper {
+  padding: 1px;
+}
+
+#color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.radius-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+#radius-slider {
+  width: 52px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  outline: none;
+}
+
+#radius-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #818cf8;
+  cursor: pointer;
+}
+
+#radius-value {
+  font-size: 11px;
+  color: #888;
+  min-width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Canvas area ── */
+#canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  margin: 0;
+  cursor: crosshair;
+}
+
+#drawing-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+}
+
+#cursor-preview {
+  position: absolute;
+  border: 1.5px solid rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  pointer-events: none;
+  display: none;
+  transform: translate(-50%, -50%);
+}
+
+/* ── Bottom attach bar ── */
+#attach-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #252525;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+#status-message {
+  flex: 1;
+  font-size: 12px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#status-message.error {
+  color: #ef4444;
+}
+
+#status-message.success {
+  color: #22c55e;
+}
+
+#attach-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#attach-btn:hover {
+  background: #5558e6;
+}
+
+#attach-btn:active {
+  background: #4f46e5;
+}
+
+#attach-btn:disabled {
+  background: #444;
+  color: #888;
+  cursor: default;
+}
+
+#attach-btn svg {
+  flex-shrink: 0;
+}
+
+/* ── Resize handle ── */
+#resize-handle {
+  position: absolute;
+  top: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+:host(:not(.panel-left)) #resize-handle {
+  left: 0;
+}
+
+:host(.panel-left) #resize-handle {
+  right: 0;
+}
+
+#resize-handle:hover,
+#resize-handle.active {
+  background: rgba(99, 102, 241, 0.4);
+}
