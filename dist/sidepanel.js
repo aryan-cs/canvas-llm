@@ -7171,6 +7171,8 @@
       });
       this.onSettings = opts.onSettings || (() => {
       });
+      this.onView = opts.onView || (() => {
+      });
       this.onRemoteConnected = opts.onRemoteConnected || (() => {
       });
       this.onError = opts.onError || (() => {
@@ -7225,6 +7227,8 @@
               this.onAction(msg.action);
             } else if (msg && msg.type === "settings" && msg.settings) {
               this.onSettings(msg.settings);
+            } else if (msg && msg.type === "view") {
+              this.onView(msg.view);
             } else if (msg && msg.type === "paste") {
               this.onPasteRequest();
               try {
@@ -7274,6 +7278,11 @@
     sendSettings(settings) {
       if (this._conn && this._conn.open) {
         this._conn.send({ type: "settings", settings });
+      }
+    }
+    sendView(view) {
+      if (this._conn && this._conn.open) {
+        this._conn.send({ type: "view", view });
       }
     }
     sendInit(canvasDataUrl, settings) {
@@ -7391,6 +7400,14 @@
   var viewScale = 1;
   var viewPanX = 0;
   var viewPanY = 0;
+  var _suppressViewSync = false;
+  function sendViewToRemote() {
+    if (_suppressViewSync) return;
+    if (peerHost && peerHost.getState() === "connected") {
+      const r = container.getBoundingClientRect();
+      peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+    }
+  }
   container.addEventListener("wheel", (e) => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
@@ -7410,6 +7427,7 @@
     viewScale = engine._viewScale;
     viewPanX = engine._viewPanX;
     viewPanY = engine._viewPanY;
+    sendViewToRemote();
   }, { passive: false });
   container.addEventListener("dblclick", (e) => {
     if (viewScale !== 1) {
@@ -7418,6 +7436,7 @@
       viewPanX = 0;
       viewPanY = 0;
       engine.resetView();
+      sendViewToRemote();
     }
   });
   document.addEventListener("keydown", (e) => {
@@ -7594,6 +7613,18 @@
         else if (action === "redo") engine.redo();
         else if (action === "clear") engine.clear();
       },
+      onView: (view) => {
+        _suppressViewSync = true;
+        const r = container.getBoundingClientRect();
+        viewScale = view.scale;
+        viewPanX = view.npx * r.width;
+        viewPanY = view.npy * r.height;
+        engine.setViewTransform(viewScale, viewPanX, viewPanY);
+        viewScale = engine._viewScale;
+        viewPanX = engine._viewPanX;
+        viewPanY = engine._viewPanY;
+        _suppressViewSync = false;
+      },
       onSettings: (settings) => {
         _suppressSettingsSync = true;
         if (settings.bg) setBg(settings.bg, true);
@@ -7615,6 +7646,8 @@
       onRemoteConnected: () => {
         const settings = { bg: engine.background, grid: gridOn, gridSize };
         peerHost.sendInit(engine.toDataURL(), settings);
+        const r = container.getBoundingClientRect();
+        peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
       },
       onPasteRequest: async () => {
         try {

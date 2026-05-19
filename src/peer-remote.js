@@ -11,6 +11,7 @@ export class PeerRemote {
     this.onAction = opts.onAction || (() => {});
     this.onDrawEvent = opts.onDrawEvent || (() => {});
     this.onSettings = opts.onSettings || (() => {});
+    this.onView = opts.onView || (() => {});
     this.onInit = opts.onInit || (() => {});
 
     this._peer = null;
@@ -52,6 +53,8 @@ export class PeerRemote {
             this.onDrawEvent(msg.event);
           } else if (msg && msg.type === 'settings' && msg.settings) {
             this.onSettings(msg.settings);
+          } else if (msg && msg.type === 'view') {
+            this.onView(msg.view);
           } else if (msg && msg.type === 'init') {
             this.onInit(msg.canvasData, msg.settings);
           }
@@ -99,6 +102,11 @@ export class PeerRemote {
   sendSettings(settings) {
     if (!this._conn || this._conn.open === false) return;
     this._conn.send({ type: 'settings', settings });
+  }
+
+  sendView(view) {
+    if (!this._conn || this._conn.open === false) return;
+    this._conn.send({ type: 'view', view });
   }
 
   requestPaste() {

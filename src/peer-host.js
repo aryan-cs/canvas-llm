@@ -9,6 +9,7 @@ export class PeerHost {
     this.onPasteRequest = opts.onPasteRequest || (() => {});
     this.onAction = opts.onAction || (() => {});
     this.onSettings = opts.onSettings || (() => {});
+    this.onView = opts.onView || (() => {});
     this.onRemoteConnected = opts.onRemoteConnected || (() => {});
     this.onError = opts.onError || (() => {});
 
@@ -64,6 +65,8 @@ export class PeerHost {
             this.onAction(msg.action);
           } else if (msg && msg.type === 'settings' && msg.settings) {
             this.onSettings(msg.settings);
+          } else if (msg && msg.type === 'view') {
+            this.onView(msg.view);
           } else if (msg && msg.type === 'paste') {
             this.onPasteRequest();
             try { conn.send({ type: 'paste-ack' }); } catch {}
@@ -116,6 +119,12 @@ export class PeerHost {
   sendSettings(settings) {
     if (this._conn && this._conn.open) {
       this._conn.send({ type: 'settings', settings });
+    }
+  }
+
+  sendView(view) {
+    if (this._conn && this._conn.open) {
+      this._conn.send({ type: 'view', view });
     }
   }
 

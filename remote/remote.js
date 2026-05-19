@@ -154,6 +154,15 @@ let lastTouches = null;
 let viewScale = 1;
 let viewPanX = 0;
 let viewPanY = 0;
+let _suppressViewSync = false;
+
+function sendViewToHost() {
+  if (_suppressViewSync) return;
+  if (peer && peer.getState() === 'connected') {
+    const r = container.getBoundingClientRect();
+    peer.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+  }
+}
 
 function getTouchData(touches) {
   const r = container.getBoundingClientRect();
@@ -202,6 +211,7 @@ container.addEventListener('touchmove', (e) => {
   viewScale = engine._viewScale;
   viewPanX = engine._viewPanX;
   viewPanY = engine._viewPanY;
+  sendViewToHost();
   lastTouches = curr;
 }, { passive: false });
 
@@ -224,6 +234,7 @@ container.addEventListener('touchend', (e) => {
     viewPanX = 0;
     viewPanY = 0;
     engine.resetView();
+    sendViewToHost();
   }
   lastTap = now;
 });
@@ -307,6 +318,18 @@ async function connectToPeer() {
     },
     onSettings: (settings) => {
       applySettings(settings);
+    },
+    onView: (view) => {
+      _suppressViewSync = true;
+      const r = container.getBoundingClientRect();
+      viewScale = view.scale;
+      viewPanX = view.npx * r.width;
+      viewPanY = view.npy * r.height;
+      engine.setViewTransform(viewScale, viewPanX, viewPanY);
+      viewScale = engine._viewScale;
+      viewPanX = engine._viewPanX;
+      viewPanY = engine._viewPanY;
+      _suppressViewSync = false;
     },
     onInit: (canvasData, settings) => {
       if (settings) applySettings(settings);

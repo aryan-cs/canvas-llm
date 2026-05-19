@@ -5096,6 +5096,8 @@
       });
       this.onSettings = opts.onSettings || (() => {
       });
+      this.onView = opts.onView || (() => {
+      });
       this.onInit = opts.onInit || (() => {
       });
       this._peer = null;
@@ -5131,6 +5133,8 @@
               this.onDrawEvent(msg.event);
             } else if (msg && msg.type === "settings" && msg.settings) {
               this.onSettings(msg.settings);
+            } else if (msg && msg.type === "view") {
+              this.onView(msg.view);
             } else if (msg && msg.type === "init") {
               this.onInit(msg.canvasData, msg.settings);
             }
@@ -5170,6 +5174,10 @@
     sendSettings(settings) {
       if (!this._conn || this._conn.open === false) return;
       this._conn.send({ type: "settings", settings });
+    }
+    sendView(view) {
+      if (!this._conn || this._conn.open === false) return;
+      this._conn.send({ type: "view", view });
     }
     requestPaste() {
       if (!this._conn || this._conn.open === false) {
@@ -5341,6 +5349,14 @@
   var viewScale = 1;
   var viewPanX = 0;
   var viewPanY = 0;
+  var _suppressViewSync = false;
+  function sendViewToHost() {
+    if (_suppressViewSync) return;
+    if (peer && peer.getState() === "connected") {
+      const r = container.getBoundingClientRect();
+      peer.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+    }
+  }
   function getTouchData(touches) {
     const r = container.getBoundingClientRect();
     return Array.from(touches).map((t) => ({
@@ -5377,6 +5393,7 @@
     viewScale = engine._viewScale;
     viewPanX = engine._viewPanX;
     viewPanY = engine._viewPanY;
+    sendViewToHost();
     lastTouches = curr;
   }, { passive: false });
   container.addEventListener("touchend", (e) => {
@@ -5397,6 +5414,7 @@
       viewPanX = 0;
       viewPanY = 0;
       engine.resetView();
+      sendViewToHost();
     }
     lastTap = now;
   });
@@ -5471,6 +5489,18 @@
       },
       onSettings: (settings) => {
         applySettings(settings);
+      },
+      onView: (view) => {
+        _suppressViewSync = true;
+        const r = container.getBoundingClientRect();
+        viewScale = view.scale;
+        viewPanX = view.npx * r.width;
+        viewPanY = view.npy * r.height;
+        engine.setViewTransform(viewScale, viewPanX, viewPanY);
+        viewScale = engine._viewScale;
+        viewPanX = engine._viewPanX;
+        viewPanY = engine._viewPanY;
+        _suppressViewSync = false;
       },
       onInit: (canvasData, settings) => {
         if (settings) applySettings(settings);

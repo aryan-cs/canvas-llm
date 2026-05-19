@@ -85,6 +85,15 @@ function updateUndoRedo() {
 let viewScale = 1;
 let viewPanX = 0;
 let viewPanY = 0;
+let _suppressViewSync = false;
+
+function sendViewToRemote() {
+  if (_suppressViewSync) return;
+  if (peerHost && peerHost.getState() === 'connected') {
+    const r = container.getBoundingClientRect();
+    peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+  }
+}
 
 container.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -113,6 +122,7 @@ container.addEventListener('wheel', (e) => {
   viewScale = engine._viewScale;
   viewPanX = engine._viewPanX;
   viewPanY = engine._viewPanY;
+  sendViewToRemote();
 }, { passive: false });
 
 // Double-click to reset zoom
@@ -123,6 +133,7 @@ container.addEventListener('dblclick', (e) => {
     viewPanX = 0;
     viewPanY = 0;
     engine.resetView();
+    sendViewToRemote();
   }
 });
 
@@ -302,6 +313,18 @@ async function startSharing() {
       else if (action === 'redo') engine.redo();
       else if (action === 'clear') engine.clear();
     },
+    onView: (view) => {
+      _suppressViewSync = true;
+      const r = container.getBoundingClientRect();
+      viewScale = view.scale;
+      viewPanX = view.npx * r.width;
+      viewPanY = view.npy * r.height;
+      engine.setViewTransform(viewScale, viewPanX, viewPanY);
+      viewScale = engine._viewScale;
+      viewPanX = engine._viewPanX;
+      viewPanY = engine._viewPanY;
+      _suppressViewSync = false;
+    },
     onSettings: (settings) => {
       _suppressSettingsSync = true;
       if (settings.bg) setBg(settings.bg, true);
@@ -321,9 +344,12 @@ async function startSharing() {
       _suppressSettingsSync = false;
     },
     onRemoteConnected: () => {
-      // Send current canvas state + settings to newly connected remote
+      // Send current canvas state + settings + view to newly connected remote
       const settings = { bg: engine.background, grid: gridOn, gridSize };
       peerHost.sendInit(engine.toDataURL(), settings);
+      // Also sync current view
+      const r = container.getBoundingClientRect();
+      peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
     },
     onPasteRequest: async () => {
       try {
