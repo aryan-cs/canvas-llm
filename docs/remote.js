@@ -661,6 +661,8 @@
       this._isDrawing = false;
       this._lastPt = null;
       this._activePointerId = null;
+      this._pendingStrokeStart = null;
+      this._strokeStartSent = false;
       this._undoStack = [];
       this._undoIdx = -1;
       this._remoteLast = null;
@@ -837,9 +839,12 @@
         this._activePointerId = null;
       }
       if (this._undoIdx >= 0) this._restoreUndo();
-      if (this.onDrawEvent) {
+      if (this._pendingStrokeStart) {
+        this._pendingStrokeStart = null;
+      } else if (this._strokeStartSent && this.onDrawEvent) {
         this.onDrawEvent({ type: "stroke-cancel" });
       }
+      this._strokeStartSent = false;
     }
     /* ── Load an image onto the canvas ── */
     loadImage(dataUrl) {
@@ -983,22 +988,28 @@
       ctx.moveTo(p.x, p.y);
       ctx.lineTo(p.x + 0.1, p.y + 0.1);
       ctx.stroke();
+      this._strokeStartSent = false;
       if (this.onDrawEvent) {
         const r = this.container.getBoundingClientRect();
-        this.onDrawEvent({
+        this._pendingStrokeStart = {
           type: "stroke-start",
           nx: p.x / r.width,
           ny: p.y / r.height,
           tool: this.tool,
           color: this.color,
           brushSize: this.brushSize
-        });
+        };
       }
     }
     _onMove(e) {
       if (!this._isDrawing || this.paused) return;
       if (e.pointerId !== this._activePointerId) return;
       e.preventDefault();
+      if (this._pendingStrokeStart && this.onDrawEvent) {
+        this.onDrawEvent(this._pendingStrokeStart);
+        this._pendingStrokeStart = null;
+        this._strokeStartSent = true;
+      }
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
       for (const ev of evts) {
@@ -1027,8 +1038,13 @@
       this.ctx.globalCompositeOperation = "source-over";
       this.pushUndo();
       if (this.onDrawEvent) {
+        if (this._pendingStrokeStart) {
+          this.onDrawEvent(this._pendingStrokeStart);
+          this._pendingStrokeStart = null;
+        }
         this.onDrawEvent({ type: "stroke-end" });
       }
+      this._strokeStartSent = false;
     }
     /* ── Cleanup ── */
     destroy() {

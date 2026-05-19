@@ -20,6 +20,8 @@ export class DrawingEngine {
     this._isDrawing = false;
     this._lastPt = null;
     this._activePointerId = null;
+    this._pendingStrokeStart = null;
+    this._strokeStartSent = false;
     this._undoStack = [];
     this._undoIdx = -1;
     this._remoteLast = null;
@@ -200,10 +202,14 @@ export class DrawingEngine {
       this._activePointerId = null;
     }
     if (this._undoIdx >= 0) this._restoreUndo();
-    // Tell the remote side to undo the partial stroke it received
-    if (this.onDrawEvent) {
+    // If stroke-start was never sent (still buffered), just discard it — remote
+    // never saw it, so no cancel needed. Only send cancel if it was already flushed.
+    if (this._pendingStrokeStart) {
+      this._pendingStrokeStart = null;
+    } else if (this._strokeStartSent && this.onDrawEvent) {
       this.onDrawEvent({ type: 'stroke-cancel' });
     }
+    this._strokeStartSent = false;
   }
 
   /* ── Load an image onto the canvas ── */
@@ -362,16 +368,19 @@ export class DrawingEngine {
     ctx.lineTo(p.x + 0.1, p.y + 0.1);
     ctx.stroke();
 
+    // Buffer stroke-start — only send to remote after first move confirms it's
+    // a real stroke, not a gesture that will be cancelled immediately
+    this._strokeStartSent = false;
     if (this.onDrawEvent) {
       const r = this.container.getBoundingClientRect();
-      this.onDrawEvent({
+      this._pendingStrokeStart = {
         type: 'stroke-start',
         nx: p.x / r.width,
         ny: p.y / r.height,
         tool: this.tool,
         color: this.color,
         brushSize: this.brushSize,
-      });
+      };
     }
   }
 
@@ -379,6 +388,14 @@ export class DrawingEngine {
     if (!this._isDrawing || this.paused) return;
     if (e.pointerId !== this._activePointerId) return;
     e.preventDefault();
+
+    // Flush pending stroke-start on first move — confirms this is a real stroke
+    if (this._pendingStrokeStart && this.onDrawEvent) {
+      this.onDrawEvent(this._pendingStrokeStart);
+      this._pendingStrokeStart = null;
+      this._strokeStartSent = true;
+    }
+
     const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
     for (const ev of evts) {
@@ -410,8 +427,14 @@ export class DrawingEngine {
     this.pushUndo();
 
     if (this.onDrawEvent) {
+      // Flush pending stroke-start for taps (pointerdown with no move)
+      if (this._pendingStrokeStart) {
+        this.onDrawEvent(this._pendingStrokeStart);
+        this._pendingStrokeStart = null;
+      }
       this.onDrawEvent({ type: 'stroke-end' });
     }
+    this._strokeStartSent = false;
   }
 
   /* ── Cleanup ── */
