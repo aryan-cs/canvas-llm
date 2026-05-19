@@ -264,9 +264,9 @@ function applySettings(settings) {
   _suppressSettingsSync = false;
 }
 
-function applyInitCanvas(canvasDataUrl) {
-  if (!canvasDataUrl) return;
-  engine.loadImage(canvasDataUrl);
+function applyInitStrokes(strokes) {
+  if (!strokes) return;
+  engine.loadStrokes(strokes);
 }
 
 async function connectToPeer() {
@@ -318,9 +318,9 @@ async function connectToPeer() {
     onView: () => {
       // Ignored: views are independent per device.
     },
-    onInit: (canvasData, settings) => {
+    onInit: (strokes, settings) => {
       if (settings) applySettings(settings);
-      if (canvasData) applyInitCanvas(canvasData);
+      if (strokes) applyInitStrokes(strokes);
     },
     onError: (err) => {
       console.error('PeerRemote error:', err);

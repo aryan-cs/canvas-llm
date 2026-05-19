@@ -1,11 +1,21 @@
-/* ── Shared Drawing Engine ── */
-const MAX_HISTORY = 30;
+/* ── Shared Drawing Engine (vector-based, infinite whiteboard model) ──
+
+   Architecture (same as Excalidraw / tldraw / Miro / FigJam):
+   - World coordinate space: infinite 2D plane, shared by all devices.
+   - Strokes stored as vectors: [{ tool, color, brushSize, points: [{x,y}, ...] }].
+   - Each device has its OWN viewport (panX, panY, scale) — never synced.
+   - Canvas is a window into the world; we redraw all strokes through the
+     viewport transform on every frame.
+   - Network sync sends world coordinates only; receivers convert to their
+     own screen via their local viewport. */
+
+const MAX_HISTORY = 50;
 
 export class DrawingEngine {
   constructor(canvas, container, opts = {}) {
     this.canvas = canvas;
     this.container = container;
-    this.ctx = canvas.getContext('2d', { willReadFrequently: true });
+    this.ctx = canvas.getContext('2d');
 
     this.tool = 'draw';
     this.color = '#000000';
@@ -17,28 +27,30 @@ export class DrawingEngine {
     this.onHistoryChange = opts.onHistoryChange || (() => {});
     this.onDrawEvent = opts.onDrawEvent || null;
 
-    this._isDrawing = false;
-    this._lastPt = null;
-    this._activePointerId = null;
-    this._pendingStrokeStart = null;
-    this._strokeStartSent = false;
-    this._undoStack = [];
+    // Vector storage
+    this._strokes = [];            // Committed strokes (world coords)
+    this._currentLocalStroke = null;
+    this._currentRemoteStroke = null;
+    this._undoStack = [];          // Snapshots of _strokes (JSON strings)
     this._undoIdx = -1;
-    this._remoteLast = null;
 
-    // View transform (zoom/pan)
-    this.paused = false;
+    // Viewport — LOCAL to this device, never synced
     this._viewScale = 1;
     this._viewPanX = 0;
     this._viewPanY = 0;
+    this.paused = false;
 
-    // Bind pointer handlers
+    // Pointer state
+    this._isDrawing = false;
+    this._activePointerId = null;
+    this._strokeStartSent = false;
+    this._pendingStrokeStart = null;
+
+    // Bind handlers
     this._onDown = this._onDown.bind(this);
     this._onMove = this._onMove.bind(this);
     this._onUp = this._onUp.bind(this);
 
-    // Listen on container (not canvas) so drawing works in the visible area
-    // outside the canvas element when zoomed out.
     container.addEventListener('pointerdown', this._onDown);
     container.addEventListener('pointermove', this._onMove);
     container.addEventListener('pointerup', this._onUp);
@@ -67,418 +79,202 @@ export class DrawingEngine {
     if (this._gridOn) this._updateGridTransform();
   }
 
-  /* ── Resize (retina-aware, preserves content) ── */
+  _updateGridTransform() {
+    if (!this.gridOverlay || this.gridOverlay.style.display === 'none') return;
+    const size = this._gridSize * this._viewScale;
+    const c = this.background === '#000000' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    this.gridOverlay.style.backgroundImage =
+      `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`;
+    this.gridOverlay.style.backgroundSize = `${size}px ${size}px`;
+    this.gridOverlay.style.backgroundPosition = `${this._viewPanX % size}px ${this._viewPanY % size}px`;
+    this.gridOverlay.style.transform = '';
+  }
+
+  /* ── Resize canvas to match container, redraw all strokes ── */
   resize() {
     const r = this.container.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
     const dpr = devicePixelRatio || 1;
-    const { canvas, ctx } = this;
+    const { canvas } = this;
 
-    const old = document.createElement('canvas');
-    old.width = canvas.width; old.height = canvas.height;
-    old.getContext('2d').drawImage(canvas, 0, 0);
-
-    canvas.width = r.width * dpr;
-    canvas.height = r.height * dpr;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
     canvas.style.width = r.width + 'px';
     canvas.style.height = r.height + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    canvas.style.transform = '';
 
-    ctx.fillStyle = this.background;
-    ctx.fillRect(0, 0, r.width, r.height);
-
-    if (old.width > 0 && old.height > 0) {
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(old, 0, 0);
-      ctx.restore();
-    }
+    this._redraw();
   }
 
-  /* ── Undo / Redo ── */
+  /* ── Apply the combined dpr × viewport transform to the ctx ── */
+  _applyTransform() {
+    const dpr = devicePixelRatio || 1;
+    const s = dpr * this._viewScale;
+    this.ctx.setTransform(s, 0, 0, s, dpr * this._viewPanX, dpr * this._viewPanY);
+  }
+
+  /* ── Full redraw — clear, fill background, draw every stroke ── */
+  _redraw() {
+    const { ctx, canvas } = this;
+    // Background — in raw pixels, no transform
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = this.background;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Apply viewport transform for stroke rendering
+    this._applyTransform();
+
+    for (const stroke of this._strokes) {
+      this._renderStroke(stroke);
+    }
+    if (this._currentLocalStroke) this._renderStroke(this._currentLocalStroke);
+    if (this._currentRemoteStroke) this._renderStroke(this._currentRemoteStroke);
+  }
+
+  /* Render a single stroke (ctx transform is already set to viewport+dpr) */
+  _renderStroke(stroke) {
+    const { ctx } = this;
+    const pts = stroke.points;
+    if (!pts || pts.length === 0) return;
+
+    ctx.globalCompositeOperation = stroke.tool === 'erase' ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    if (pts.length === 1) {
+      ctx.lineTo(pts[0].x + 0.1, pts[0].y + 0.1);
+    } else {
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x, pts[i].y);
+      }
+    }
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* Incremental draw of one segment (avoids redrawing all strokes per move) */
+  _drawSegment(stroke, p1, p2) {
+    const { ctx } = this;
+    this._applyTransform();
+    ctx.globalCompositeOperation = stroke.tool === 'erase' ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    if (p1.x === p2.x && p1.y === p2.y) {
+      ctx.lineTo(p2.x + 0.1, p2.y + 0.1);
+    } else {
+      ctx.lineTo(p2.x, p2.y);
+    }
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ── Screen → world transform ── */
+  _screenToWorld(e) {
+    const r = this.container.getBoundingClientRect();
+    const sx = e.clientX - r.left;
+    const sy = e.clientY - r.top;
+    return {
+      x: (sx - this._viewPanX) / this._viewScale,
+      y: (sy - this._viewPanY) / this._viewScale,
+    };
+  }
+
+  /* ── Undo / Redo (vector-based, snapshot the stroke list) ── */
   pushUndo() {
-    const { canvas, ctx } = this;
-    if (canvas.width === 0 || canvas.height === 0) return;
     this._undoStack = this._undoStack.slice(0, this._undoIdx + 1);
-    this._undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    this._undoStack.push(JSON.stringify(this._strokes));
     if (this._undoStack.length > MAX_HISTORY) this._undoStack.shift();
     this._undoIdx = this._undoStack.length - 1;
     this.onHistoryChange();
   }
 
-  _restoreUndo() {
-    const s = this._undoStack[this._undoIdx];
-    if (!s) return;
-    this.ctx.save();
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.ctx.putImageData(s, 0, 0);
-    this.ctx.restore();
-    this.onHistoryChange();
+  undo() {
+    if (this._undoIdx > 0) {
+      this._undoIdx--;
+      this._strokes = JSON.parse(this._undoStack[this._undoIdx]);
+      this._redraw();
+      this.onHistoryChange();
+    }
   }
 
-  undo() { if (this._undoIdx > 0) { this._undoIdx--; this._restoreUndo(); } }
-  redo() { if (this._undoIdx < this._undoStack.length - 1) { this._undoIdx++; this._restoreUndo(); } }
+  redo() {
+    if (this._undoIdx < this._undoStack.length - 1) {
+      this._undoIdx++;
+      this._strokes = JSON.parse(this._undoStack[this._undoIdx]);
+      this._redraw();
+      this.onHistoryChange();
+    }
+  }
+
   canUndo() { return this._undoIdx > 0; }
   canRedo() { return this._undoIdx < this._undoStack.length - 1; }
 
   /* ── Clear ── */
   clear() {
-    const dpr = devicePixelRatio || 1;
-    const { ctx, canvas } = this;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // Fill entire canvas (which may be expanded beyond container)
-    const cssW = canvas.width / dpr;
-    const cssH = canvas.height / dpr;
-    ctx.fillStyle = this.background;
-    ctx.fillRect(0, 0, cssW, cssH);
+    this._strokes = [];
+    this._currentLocalStroke = null;
+    this._currentRemoteStroke = null;
     this.pushUndo();
+    this._redraw();
   }
 
-  /* ── Background switching ── */
-  setBackground(bg, repaint) {
-    const oldBg = this.background;
+  /* ── Background ── */
+  setBackground(bg /*, repaint */) {
     this.background = bg;
-
-    if (repaint && this.canvas.width > 0 && this.canvas.height > 0) {
-      const { ctx, canvas } = this;
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = imgData.data;
-      const oldR = parseInt(oldBg.slice(1,3),16), oldG = parseInt(oldBg.slice(3,5),16), oldB = parseInt(oldBg.slice(5,7),16);
-      const newR = parseInt(bg.slice(1,3),16), newG = parseInt(bg.slice(3,5),16), newB = parseInt(bg.slice(5,7),16);
-      const tol = 10;
-      for (let i = 0; i < d.length; i += 4) {
-        if (Math.abs(d[i]-oldR) <= tol && Math.abs(d[i+1]-oldG) <= tol && Math.abs(d[i+2]-oldB) <= tol && d[i+3] > 240) {
-          d[i] = newR; d[i+1] = newG; d[i+2] = newB;
-        }
-      }
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.putImageData(imgData, 0, 0);
-      ctx.restore();
-      this.pushUndo();
-    }
-  }
-
-  /* ── View transform (zoom / pan) ── */
-  setViewTransform(scale, panX, panY) {
-    scale = Math.max(0.25, Math.min(5, scale));
-    this._viewScale = scale;
-    this._viewPanX = panX;
-    this._viewPanY = panY;
-
-    // Zoom/pan is purely a CSS transform — never touch the backing store here.
-    // Canvas expansion happens lazily in _onDown / remoteStroke when a stroke
-    // would land outside current bounds.
-    this.canvas.style.transformOrigin = '0 0';
-    this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    this._redraw();
     this._updateGridTransform();
   }
 
-  /* Grow the canvas backing store so a point (in canvas-local coords) is drawable.
-     Called lazily from _onDown / remoteStroke — never during zoom/pan.
-     Adds generous buffer so subsequent strokes rarely re-trigger. */
-  _expandCanvasForPoint(px, py) {
-    const dpr = devicePixelRatio || 1;
-    const curW = this.canvas.width / dpr;
-    const curH = this.canvas.height / dpr;
-
-    // How much the point lies outside current bounds
-    const expandLeft = Math.max(0, -px);
-    const expandTop = Math.max(0, -py);
-    const expandRight = Math.max(0, px - curW + 1);
-    const expandBottom = Math.max(0, py - curH + 1);
-
-    if (expandLeft < 1 && expandTop < 1 && expandRight < 1 && expandBottom < 1) return;
-
-    // Add generous buffer (500px each direction that needs it) to avoid re-triggering
-    const buf = 500;
-    const totalLeft = Math.ceil(expandLeft + (expandLeft > 0 ? buf : 0));
-    const totalTop = Math.ceil(expandTop + (expandTop > 0 ? buf : 0));
-    const totalRight = Math.ceil(expandRight + (expandRight > 0 ? buf : 0));
-    const totalBottom = Math.ceil(expandBottom + (expandBottom > 0 ? buf : 0));
-
-    const newW = Math.ceil(curW + totalLeft + totalRight);
-    const newH = Math.ceil(curH + totalTop + totalBottom);
-    const offX = totalLeft;
-    const offY = totalTop;
-
-    // Save current content
-    const old = document.createElement('canvas');
-    old.width = this.canvas.width;
-    old.height = this.canvas.height;
-    old.getContext('2d').drawImage(this.canvas, 0, 0);
-
-    // Resize canvas
-    this.canvas.width = newW * dpr;
-    this.canvas.height = newH * dpr;
-    this.canvas.style.width = newW + 'px';
-    this.canvas.style.height = newH + 'px';
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // Fill with background
-    this.ctx.fillStyle = this.background;
-    this.ctx.fillRect(0, 0, newW, newH);
-
-    // Restore content at offset
-    this.ctx.save();
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.ctx.drawImage(old, offX * dpr, offY * dpr);
-    this.ctx.restore();
-
-    // Clear undo stack — old snapshots have wrong origin.
-    // Push one fresh snapshot so undo still works after expansion.
-    this._undoStack = [];
-    this._undoIdx = -1;
-    this.pushUndo();
-
-    // Shift the pan to compensate for the canvas origin moving.
-    // Canvas grew leftward by offX, so old content moved from raw 0 to raw offX.
-    // To keep old content at the same screen position, pan must DECREASE.
-    if (offX > 0 || offY > 0) {
-      this._viewPanX -= offX * this._viewScale;
-      this._viewPanY -= offY * this._viewScale;
-      this.canvas.style.transform = `translate(${this._viewPanX}px, ${this._viewPanY}px) scale(${this._viewScale})`;
-    }
+  /* ── Viewport (zoom / pan) — purely local, never synced ── */
+  setViewTransform(scale, panX, panY) {
+    scale = Math.max(0.1, Math.min(10, scale));
+    this._viewScale = scale;
+    this._viewPanX = panX;
+    this._viewPanY = panY;
+    this._redraw();
+    this._updateGridTransform();
   }
 
   resetView() {
     this.setViewTransform(1, 0, 0);
   }
 
-  _updateGridTransform() {
-    if (!this.gridOverlay || this.gridOverlay.style.display === 'none') return;
-    // Keep grid as infinite repeating pattern — adjust size and offset to match zoom/pan
-    const size = this._gridSize * this._viewScale;
-    const c = this.background === '#000000' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
-    this.gridOverlay.style.backgroundImage =
-      `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`;
-    this.gridOverlay.style.backgroundSize = `${size}px ${size}px`;
-    this.gridOverlay.style.backgroundPosition =
-      `${this._viewPanX % size}px ${this._viewPanY % size}px`;
-    // No CSS transform on grid — it stays full-size and infinite
-    this.gridOverlay.style.transform = '';
-  }
-
-  cancelStroke() {
-    if (!this._isDrawing) return;
-    this._isDrawing = false;
-    this._lastPt = null;
-    this.ctx.globalCompositeOperation = 'source-over';
-    // Release pointer capture so touch events work for gestures
-    if (this._activePointerId != null) {
-      try { this.container.releasePointerCapture(this._activePointerId); } catch {}
-      this._activePointerId = null;
-    }
-    if (this._undoIdx >= 0) this._restoreUndo();
-    // If stroke-start was never sent (still buffered), just discard it — remote
-    // never saw it, so no cancel needed. Only send cancel if it was already flushed.
-    if (this._pendingStrokeStart) {
-      this._pendingStrokeStart = null;
-    } else if (this._strokeStartSent && this.onDrawEvent) {
-      this.onDrawEvent({ type: 'stroke-cancel' });
-    }
-    this._strokeStartSent = false;
-  }
-
-  /* ── Load an image onto the canvas ── */
-  loadImage(dataUrl) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const { ctx, canvas } = this;
-        const dpr = devicePixelRatio || 1;
-        // Image dimensions are in CSS pixels (sender uses toCssDataURL).
-        // Expand canvas to fit it.
-        this._expandCanvasForPoint(img.width, img.height);
-        ctx.save();
-        // ctx already has dpr transform active — drawImage uses CSS coords.
-        ctx.fillStyle = this.background;
-        ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-        ctx.drawImage(img, 0, 0);
-        ctx.restore();
-        this.pushUndo();
-        resolve();
-      };
-      img.onerror = () => resolve();
-      img.src = dataUrl;
-    });
-  }
-
-  /* ── Export (captures current viewport when zoomed/panned) ── */
-  toDataURL() {
-    if (this._viewScale === 1 && this._viewPanX === 0 && this._viewPanY === 0) {
-      return this.canvas.toDataURL('image/png');
-    }
-    return this._exportView().toDataURL('image/png');
-  }
-
-  toBlob() {
-    if (this._viewScale === 1 && this._viewPanX === 0 && this._viewPanY === 0) {
-      return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png'));
-    }
-    return new Promise(resolve => this._exportView().toBlob(resolve, 'image/png'));
-  }
-
-  /* Export at CSS resolution (dpr=1) — for peer sync so receiving devices
-     with different dpr interpret coordinates consistently. */
-  toCssDataURL() {
-    const dpr = devicePixelRatio || 1;
-    const tmp = document.createElement('canvas');
-    tmp.width = Math.max(1, Math.round(this.canvas.width / dpr));
-    tmp.height = Math.max(1, Math.round(this.canvas.height / dpr));
-    const tctx = tmp.getContext('2d');
-    tctx.drawImage(this.canvas, 0, 0, tmp.width, tmp.height);
-    return tmp.toDataURL('image/png');
-  }
-
-  _exportView() {
-    const dpr = devicePixelRatio || 1;
-    const r = this.container.getBoundingClientRect();
-    const tmp = document.createElement('canvas');
-    tmp.width = r.width * dpr;
-    tmp.height = r.height * dpr;
-    const ctx = tmp.getContext('2d');
-    ctx.scale(dpr, dpr);
-    // Fill background
-    ctx.fillStyle = this.background;
-    ctx.fillRect(0, 0, r.width, r.height);
-    // Draw source canvas with current view transform
-    ctx.translate(this._viewPanX, this._viewPanY);
-    ctx.scale(this._viewScale, this._viewScale);
-    // Use actual canvas CSS dimensions (may be larger than container after expansion)
-    const cssW = this.canvas.width / dpr;
-    const cssH = this.canvas.height / dpr;
-    ctx.drawImage(this.canvas, 0, 0, cssW, cssH);
-    return tmp;
-  }
-
-  /* ── Remote stroke replay ── */
-  remoteStroke(event) {
-    const { ctx } = this;
-
-    switch (event.type) {
-      case 'stroke-start': {
-        let x = event.x;
-        let y = event.y;
-        // Expand canvas if remote stroke lands outside current bounds
-        this._expandCanvasForPoint(x, y);
-        // Re-derive after expansion may have shifted origin
-        x = event.x;
-        y = event.y;
-        const prevOp = ctx.globalCompositeOperation;
-        const prevStroke = ctx.strokeStyle;
-        const prevWidth = ctx.lineWidth;
-        const prevCap = ctx.lineCap;
-        const prevJoin = ctx.lineJoin;
-        ctx.globalCompositeOperation = event.tool === 'erase' ? 'destination-out' : 'source-over';
-        ctx.strokeStyle = event.color;
-        ctx.lineWidth = event.brushSize;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + 0.1, y + 0.1);
-        ctx.stroke();
-        ctx.globalCompositeOperation = prevOp;
-        ctx.strokeStyle = prevStroke;
-        ctx.lineWidth = prevWidth;
-        ctx.lineCap = prevCap;
-        ctx.lineJoin = prevJoin;
-        this._remoteLast = { x, y, tool: event.tool, color: event.color, brushSize: event.brushSize };
-        break;
-      }
-      case 'stroke-move': {
-        if (!this._remoteLast) break;
-        const x = event.x;
-        const y = event.y;
-        const prevOp = ctx.globalCompositeOperation;
-        const prevStroke = ctx.strokeStyle;
-        const prevWidth = ctx.lineWidth;
-        const prevCap = ctx.lineCap;
-        const prevJoin = ctx.lineJoin;
-        ctx.globalCompositeOperation = this._remoteLast.tool === 'erase' ? 'destination-out' : 'source-over';
-        ctx.strokeStyle = this._remoteLast.color;
-        ctx.lineWidth = this._remoteLast.brushSize;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(this._remoteLast.x, this._remoteLast.y);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-        ctx.globalCompositeOperation = prevOp;
-        ctx.strokeStyle = prevStroke;
-        ctx.lineWidth = prevWidth;
-        ctx.lineCap = prevCap;
-        ctx.lineJoin = prevJoin;
-        this._remoteLast.x = x;
-        this._remoteLast.y = y;
-        break;
-      }
-      case 'stroke-end':
-        this._remoteLast = null;
-        this.pushUndo();
-        break;
-      case 'stroke-cancel':
-        // Remote cancelled a partial stroke (e.g. pinch gesture interrupted it)
-        this._remoteLast = null;
-        if (this._undoIdx >= 0) this._restoreUndo();
-        break;
-      case 'clear':
-        this.clear();
-        break;
-    }
-  }
-
   /* ── Pointer handlers ── */
-  _pt(e) {
-    const r = this.container.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left - this._viewPanX) / this._viewScale,
-      y: (e.clientY - r.top - this._viewPanY) / this._viewScale,
-    };
-  }
-
   _onDown(e) {
     if (this.paused || e.button !== 0) return;
-    // Only handle first pointer — prevent second finger from starting a new stroke
     if (this._isDrawing) return;
     e.preventDefault();
 
-    // Lazily expand canvas if the stroke lands outside current bounds.
-    // Must happen before _pt() so the pan compensation is already applied.
-    let p = this._pt(e);
-    this._expandCanvasForPoint(p.x, p.y);
-    // Re-derive point after expansion may have shifted _viewPanX/_viewPanY
-    p = this._pt(e);
-
+    const p = this._screenToWorld(e);
     this._isDrawing = true;
-    this._lastPt = p;
     this._activePointerId = e.pointerId;
     this.container.setPointerCapture(e.pointerId);
 
-    const { ctx } = this;
-    ctx.globalCompositeOperation = this.tool === 'erase' ? 'destination-out' : 'source-over';
-    ctx.strokeStyle = this.color;
-    ctx.lineWidth = this.brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    this._currentLocalStroke = {
+      tool: this.tool,
+      color: this.color,
+      brushSize: this.brushSize,
+      points: [p],
+    };
 
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.lineTo(p.x + 0.1, p.y + 0.1);
-    ctx.stroke();
+    // Draw the initial dot
+    this._drawSegment(this._currentLocalStroke, p, p);
 
-    // Buffer stroke-start — only send to remote after first move confirms it's
-    // a real stroke, not a gesture that will be cancelled immediately
+    // Buffer stroke-start — flushed on first move so gestures can cancel it
     this._strokeStartSent = false;
     if (this.onDrawEvent) {
       this._pendingStrokeStart = {
         type: 'stroke-start',
-        x: p.x,
-        y: p.y,
-        tool: this.tool,
-        color: this.color,
-        brushSize: this.brushSize,
+        x: p.x, y: p.y,
+        tool: this.tool, color: this.color, brushSize: this.brushSize,
       };
     }
   }
@@ -488,7 +284,7 @@ export class DrawingEngine {
     if (e.pointerId !== this._activePointerId) return;
     e.preventDefault();
 
-    // Flush pending stroke-start on first move — confirms this is a real stroke
+    // Flush stroke-start on first move — confirms it's a real stroke
     if (this._pendingStrokeStart && this.onDrawEvent) {
       this.onDrawEvent(this._pendingStrokeStart);
       this._pendingStrokeStart = null;
@@ -496,20 +292,14 @@ export class DrawingEngine {
     }
 
     const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    const stroke = this._currentLocalStroke;
     for (const ev of evts) {
-      const p = this._pt(ev);
-      this.ctx.beginPath();
-      this.ctx.moveTo(this._lastPt.x, this._lastPt.y);
-      this.ctx.lineTo(p.x, p.y);
-      this.ctx.stroke();
-      this._lastPt = p;
-
+      const p = this._screenToWorld(ev);
+      const last = stroke.points[stroke.points.length - 1];
+      stroke.points.push(p);
+      this._drawSegment(stroke, last, p);
       if (this.onDrawEvent) {
-        this.onDrawEvent({
-          type: 'stroke-move',
-          x: p.x,
-          y: p.y,
-        });
+        this.onDrawEvent({ type: 'stroke-move', x: p.x, y: p.y });
       }
     }
   }
@@ -518,14 +308,17 @@ export class DrawingEngine {
     if (!this._isDrawing) return;
     if (e.pointerId !== this._activePointerId) return;
     this._isDrawing = false;
-    this._lastPt = null;
     this._activePointerId = null;
-    this.container.releasePointerCapture(e.pointerId);
-    this.ctx.globalCompositeOperation = 'source-over';
+    try { this.container.releasePointerCapture(e.pointerId); } catch {}
+
+    if (this._currentLocalStroke) {
+      this._strokes.push(this._currentLocalStroke);
+      this._currentLocalStroke = null;
+    }
     this.pushUndo();
 
     if (this.onDrawEvent) {
-      // Flush pending stroke-start for taps (pointerdown with no move)
+      // Flush pending stroke-start for taps (down + up with no move)
       if (this._pendingStrokeStart) {
         this.onDrawEvent(this._pendingStrokeStart);
         this._pendingStrokeStart = null;
@@ -533,6 +326,89 @@ export class DrawingEngine {
       this.onDrawEvent({ type: 'stroke-end' });
     }
     this._strokeStartSent = false;
+  }
+
+  cancelStroke() {
+    if (!this._isDrawing) return;
+    this._isDrawing = false;
+    if (this._activePointerId != null) {
+      try { this.container.releasePointerCapture(this._activePointerId); } catch {}
+      this._activePointerId = null;
+    }
+    this._currentLocalStroke = null;
+    this._redraw();
+
+    if (this._pendingStrokeStart) {
+      this._pendingStrokeStart = null;
+    } else if (this._strokeStartSent && this.onDrawEvent) {
+      this.onDrawEvent({ type: 'stroke-cancel' });
+    }
+    this._strokeStartSent = false;
+  }
+
+  /* ── Remote stroke replay ── */
+  remoteStroke(event) {
+    switch (event.type) {
+      case 'stroke-start': {
+        this._currentRemoteStroke = {
+          tool: event.tool,
+          color: event.color,
+          brushSize: event.brushSize,
+          points: [{ x: event.x, y: event.y }],
+        };
+        this._drawSegment(this._currentRemoteStroke,
+          { x: event.x, y: event.y }, { x: event.x, y: event.y });
+        break;
+      }
+      case 'stroke-move': {
+        if (!this._currentRemoteStroke) break;
+        const stroke = this._currentRemoteStroke;
+        const last = stroke.points[stroke.points.length - 1];
+        const p = { x: event.x, y: event.y };
+        stroke.points.push(p);
+        this._drawSegment(stroke, last, p);
+        break;
+      }
+      case 'stroke-end': {
+        if (this._currentRemoteStroke) {
+          this._strokes.push(this._currentRemoteStroke);
+          this._currentRemoteStroke = null;
+          this.pushUndo();
+        }
+        break;
+      }
+      case 'stroke-cancel': {
+        this._currentRemoteStroke = null;
+        this._redraw();
+        break;
+      }
+      case 'clear': {
+        this.clear();
+        break;
+      }
+    }
+  }
+
+  /* ── Stroke list import/export (for peer sync) ── */
+  serializeStrokes() {
+    return JSON.parse(JSON.stringify(this._strokes));
+  }
+
+  loadStrokes(strokes) {
+    this._strokes = Array.isArray(strokes) ? strokes : [];
+    this._currentLocalStroke = null;
+    this._currentRemoteStroke = null;
+    this.pushUndo();
+    this._redraw();
+  }
+
+  /* ── Export (current viewport as PNG, for chat paste) ── */
+  toDataURL() {
+    return this.canvas.toDataURL('image/png');
+  }
+
+  toBlob() {
+    return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png'));
   }
 
   /* ── Cleanup ── */

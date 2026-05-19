@@ -128,9 +128,9 @@ export class PeerHost {
     }
   }
 
-  sendInit(canvasDataUrl, settings) {
+  sendInit(strokes, settings) {
     if (this._conn && this._conn.open) {
-      this._conn.send({ type: 'init', canvasData: canvasDataUrl, settings });
+      this._conn.send({ type: 'init', strokes, settings });
     }
   }
 

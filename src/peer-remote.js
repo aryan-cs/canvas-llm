@@ -56,7 +56,7 @@ export class PeerRemote {
           } else if (msg && msg.type === 'view') {
             this.onView(msg.view);
           } else if (msg && msg.type === 'init') {
-            this.onInit(msg.canvasData, msg.settings);
+            this.onInit(msg.strokes, msg.settings);
           }
         });
 
