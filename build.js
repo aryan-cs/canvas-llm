@@ -6,8 +6,7 @@ const watch = process.argv.includes('--watch');
 
 const copyFiles = [
   { from: 'manifest.json', to: 'dist/manifest.json' },
-  { from: 'panel.html', to: 'dist/panel.html' },
-  { from: 'panel.css', to: 'dist/panel.css' },
+  { from: 'sidepanel.html', to: 'dist/sidepanel.html' },
   { from: 'icons', to: 'dist/icons' },
 ];
 
@@ -42,6 +41,7 @@ const buildOptions = {
   entryPoints: {
     content: 'src/content.js',
     background: 'src/background.js',
+    sidepanel: 'src/sidepanel.js',
   },
   bundle: true,
   outdir: 'dist',
