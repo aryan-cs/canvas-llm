@@ -88,9 +88,11 @@ let viewPanY = 0;
 let _suppressViewSync = false;
 
 function sendViewToRemote() {
-  // No-op: each device manages its own view (zoom/pan) independently.
-  // Stroke coordinates are absolute canvas-local positions, so strokes
-  // appear at the same canvas position on both devices regardless of view.
+  if (_suppressViewSync) return;
+  if (peerHost && peerHost.getState() === 'connected') {
+    const c = engine.getViewCenter();
+    peerHost.sendView({ cx: c.x, cy: c.y, scale: c.scale });
+  }
 }
 
 container.addEventListener('wheel', (e) => {
@@ -311,8 +313,15 @@ async function startSharing() {
       else if (action === 'redo') engine.redo();
       else if (action === 'clear') engine.clear();
     },
-    onView: () => {
-      // Ignored: views are independent per device.
+    onView: (view) => {
+      if (!view || typeof view.cx !== 'number') return;
+      _suppressViewSync = true;
+      engine.setViewCenter(view.cx, view.cy, view.scale);
+      // Mirror engine state into local view variables used by wheel handler
+      viewScale = engine._viewScale;
+      viewPanX = engine._viewPanX;
+      viewPanY = engine._viewPanY;
+      _suppressViewSync = false;
     },
     onSettings: (settings) => {
       _suppressSettingsSync = true;
@@ -333,9 +342,11 @@ async function startSharing() {
       _suppressSettingsSync = false;
     },
     onRemoteConnected: () => {
-      // Send current strokes (world coords) + settings. View is per-device.
+      // Send current strokes (world coords) + settings + initial view.
       const settings = { bg: engine.background, grid: gridOn, gridSize };
       peerHost.sendInit(engine.serializeStrokes(), settings);
+      const c = engine.getViewCenter();
+      peerHost.sendView({ cx: c.x, cy: c.y, scale: c.scale });
     },
     onPasteRequest: async () => {
       try {

@@ -157,7 +157,11 @@ let viewPanY = 0;
 let _suppressViewSync = false;
 
 function sendViewToHost() {
-  // No-op: each device manages its own view independently.
+  if (_suppressViewSync) return;
+  if (peer && peer.getState() === 'connected') {
+    const c = engine.getViewCenter();
+    peer.sendView({ cx: c.x, cy: c.y, scale: c.scale });
+  }
 }
 
 function getTouchData(touches) {
@@ -315,8 +319,15 @@ async function connectToPeer() {
     onSettings: (settings) => {
       applySettings(settings);
     },
-    onView: () => {
-      // Ignored: views are independent per device.
+    onView: (view) => {
+      if (!view || typeof view.cx !== 'number') return;
+      _suppressViewSync = true;
+      engine.setViewCenter(view.cx, view.cy, view.scale);
+      // Mirror engine state into local view variables used by gesture handlers
+      viewScale = engine._viewScale;
+      viewPanX = engine._viewPanX;
+      viewPanY = engine._viewPanY;
+      _suppressViewSync = false;
     },
     onInit: (strokes, settings) => {
       if (settings) applySettings(settings);

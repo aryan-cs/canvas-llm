@@ -2930,6 +2930,25 @@
     resetView() {
       this.setViewTransform(1, 0, 0);
     }
+    /* World-coordinate viewport sync — aspect-ratio-aware.
+       Returns the world-space point at the center of this device's viewport. */
+    getViewCenter() {
+      const r = this.container.getBoundingClientRect();
+      return {
+        x: (r.width / 2 - this._viewPanX) / this._viewScale,
+        y: (r.height / 2 - this._viewPanY) / this._viewScale,
+        scale: this._viewScale
+      };
+    }
+    /* Pan so the given world point sits at this device's screen center,
+       at the given scale. Aspect ratios don't matter — the center aligns. */
+    setViewCenter(worldX, worldY, scale) {
+      const r = this.container.getBoundingClientRect();
+      scale = Math.max(0.1, Math.min(10, scale));
+      const panX = r.width / 2 - worldX * scale;
+      const panY = r.height / 2 - worldY * scale;
+      this.setViewTransform(scale, panX, panY);
+    }
     /* ── Pointer handlers ── */
     _onDown(e) {
       if (this.paused || e.button !== 0) return;
@@ -7376,7 +7395,13 @@
   var viewScale = 1;
   var viewPanX = 0;
   var viewPanY = 0;
+  var _suppressViewSync = false;
   function sendViewToRemote() {
+    if (_suppressViewSync) return;
+    if (peerHost && peerHost.getState() === "connected") {
+      const c = engine.getViewCenter();
+      peerHost.sendView({ cx: c.x, cy: c.y, scale: c.scale });
+    }
   }
   container.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -7583,7 +7608,14 @@
         else if (action === "redo") engine.redo();
         else if (action === "clear") engine.clear();
       },
-      onView: () => {
+      onView: (view) => {
+        if (!view || typeof view.cx !== "number") return;
+        _suppressViewSync = true;
+        engine.setViewCenter(view.cx, view.cy, view.scale);
+        viewScale = engine._viewScale;
+        viewPanX = engine._viewPanX;
+        viewPanY = engine._viewPanY;
+        _suppressViewSync = false;
       },
       onSettings: (settings) => {
         _suppressSettingsSync = true;
@@ -7606,6 +7638,8 @@
       onRemoteConnected: () => {
         const settings = { bg: engine.background, grid: gridOn, gridSize };
         peerHost.sendInit(engine.serializeStrokes(), settings);
+        const c = engine.getViewCenter();
+        peerHost.sendView({ cx: c.x, cy: c.y, scale: c.scale });
       },
       onPasteRequest: async () => {
         try {
