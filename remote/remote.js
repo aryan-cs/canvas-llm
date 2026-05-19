@@ -159,8 +159,7 @@ let _suppressViewSync = false;
 function sendViewToHost() {
   if (_suppressViewSync) return;
   if (peer && peer.getState() === 'connected') {
-    const r = container.getBoundingClientRect();
-    peer.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.width });
+    peer.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
   }
 }
 
@@ -321,10 +320,9 @@ async function connectToPeer() {
     },
     onView: (view) => {
       _suppressViewSync = true;
-      const r = container.getBoundingClientRect();
       viewScale = view.scale;
-      viewPanX = view.npx * r.width;
-      viewPanY = view.npy * r.width;
+      viewPanX = view.panX;
+      viewPanY = view.panY;
       engine.setViewTransform(viewScale, viewPanX, viewPanY);
       viewScale = engine._viewScale;
       viewPanX = engine._viewPanX;

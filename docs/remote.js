@@ -895,13 +895,9 @@
           const { ctx, canvas: canvas2 } = this;
           ctx.save();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
-          const dpr = devicePixelRatio || 1;
-          const cw = canvas2.width;
-          const scale = cw / img.width;
-          const dh = img.height * scale;
           ctx.fillStyle = this.background;
           ctx.fillRect(0, 0, canvas2.width, canvas2.height);
-          ctx.drawImage(img, 0, 0, cw, dh);
+          ctx.drawImage(img, 0, 0);
           ctx.restore();
           this.pushUndo();
           resolve();
@@ -942,15 +938,14 @@
     }
     /* ── Remote stroke replay ── */
     remoteStroke(event) {
-      const r = this.container.getBoundingClientRect();
       const { ctx } = this;
       switch (event.type) {
         case "stroke-start": {
-          let x = event.nx * r.width;
-          let y = event.ny * r.width;
+          let x = event.x;
+          let y = event.y;
           this._expandCanvasForPoint(x, y);
-          x = event.nx * r.width;
-          y = event.ny * r.width;
+          x = event.x;
+          y = event.y;
           const prevOp = ctx.globalCompositeOperation;
           const prevStroke = ctx.strokeStyle;
           const prevWidth = ctx.lineWidth;
@@ -975,8 +970,8 @@
         }
         case "stroke-move": {
           if (!this._remoteLast) break;
-          const x = event.nx * r.width;
-          const y = event.ny * r.width;
+          const x = event.x;
+          const y = event.y;
           const prevOp = ctx.globalCompositeOperation;
           const prevStroke = ctx.strokeStyle;
           const prevWidth = ctx.lineWidth;
@@ -1044,11 +1039,10 @@
       ctx.stroke();
       this._strokeStartSent = false;
       if (this.onDrawEvent) {
-        const r = this.container.getBoundingClientRect();
         this._pendingStrokeStart = {
           type: "stroke-start",
-          nx: p.x / r.width,
-          ny: p.y / r.width,
+          x: p.x,
+          y: p.y,
           tool: this.tool,
           color: this.color,
           brushSize: this.brushSize
@@ -1065,7 +1059,6 @@
         this._strokeStartSent = true;
       }
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-      const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
       for (const ev of evts) {
         const p = this._pt(ev);
         this.ctx.beginPath();
@@ -1073,11 +1066,11 @@
         this.ctx.lineTo(p.x, p.y);
         this.ctx.stroke();
         this._lastPt = p;
-        if (this.onDrawEvent && r) {
+        if (this.onDrawEvent) {
           this.onDrawEvent({
             type: "stroke-move",
-            nx: p.x / r.width,
-            ny: p.y / r.width
+            x: p.x,
+            y: p.y
           });
         }
       }
@@ -5423,8 +5416,7 @@
   function sendViewToHost() {
     if (_suppressViewSync) return;
     if (peer && peer.getState() === "connected") {
-      const r = container.getBoundingClientRect();
-      peer.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.width });
+      peer.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
     }
   }
   function getTouchData(touches) {
@@ -5562,10 +5554,9 @@
       },
       onView: (view) => {
         _suppressViewSync = true;
-        const r = container.getBoundingClientRect();
         viewScale = view.scale;
-        viewPanX = view.npx * r.width;
-        viewPanY = view.npy * r.width;
+        viewPanX = view.panX;
+        viewPanY = view.panY;
         engine.setViewTransform(viewScale, viewPanX, viewPanY);
         viewScale = engine._viewScale;
         viewPanX = engine._viewPanX;

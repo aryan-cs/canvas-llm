@@ -287,14 +287,10 @@ export class DrawingEngine {
         const { ctx, canvas } = this;
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        // Maintain aspect ratio: scale to fit canvas width
-        const dpr = devicePixelRatio || 1;
-        const cw = canvas.width;
-        const scale = cw / img.width;
-        const dh = img.height * scale;
+        // Draw at 1:1 pixel scale — both canvases share the same coordinate space
         ctx.fillStyle = this.background;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, cw, dh);
+        ctx.drawImage(img, 0, 0);
         ctx.restore();
         this.pushUndo();
         resolve();
@@ -342,18 +338,17 @@ export class DrawingEngine {
 
   /* ── Remote stroke replay ── */
   remoteStroke(event) {
-    const r = this.container.getBoundingClientRect();
     const { ctx } = this;
 
     switch (event.type) {
       case 'stroke-start': {
-        let x = event.nx * r.width;
-        let y = event.ny * r.width;
+        let x = event.x;
+        let y = event.y;
         // Expand canvas if remote stroke lands outside current bounds
         this._expandCanvasForPoint(x, y);
         // Re-derive after expansion may have shifted origin
-        x = event.nx * r.width;
-        y = event.ny * r.width;
+        x = event.x;
+        y = event.y;
         const prevOp = ctx.globalCompositeOperation;
         const prevStroke = ctx.strokeStyle;
         const prevWidth = ctx.lineWidth;
@@ -378,8 +373,8 @@ export class DrawingEngine {
       }
       case 'stroke-move': {
         if (!this._remoteLast) break;
-        const x = event.nx * r.width;
-        const y = event.ny * r.width;
+        const x = event.x;
+        const y = event.y;
         const prevOp = ctx.globalCompositeOperation;
         const prevStroke = ctx.strokeStyle;
         const prevWidth = ctx.lineWidth;
@@ -461,11 +456,10 @@ export class DrawingEngine {
     // a real stroke, not a gesture that will be cancelled immediately
     this._strokeStartSent = false;
     if (this.onDrawEvent) {
-      const r = this.container.getBoundingClientRect();
       this._pendingStrokeStart = {
         type: 'stroke-start',
-        nx: p.x / r.width,
-        ny: p.y / r.width,
+        x: p.x,
+        y: p.y,
         tool: this.tool,
         color: this.color,
         brushSize: this.brushSize,
@@ -486,7 +480,6 @@ export class DrawingEngine {
     }
 
     const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
     for (const ev of evts) {
       const p = this._pt(ev);
       this.ctx.beginPath();
@@ -495,11 +488,11 @@ export class DrawingEngine {
       this.ctx.stroke();
       this._lastPt = p;
 
-      if (this.onDrawEvent && r) {
+      if (this.onDrawEvent) {
         this.onDrawEvent({
           type: 'stroke-move',
-          nx: p.x / r.width,
-          ny: p.y / r.width,
+          x: p.x,
+          y: p.y,
         });
       }
     }
