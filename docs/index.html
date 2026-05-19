@@ -30,16 +30,19 @@
     }
 
     /* ── Connection dot ── */
-    .dot {
-      width: 8px; height: 8px;
+    #connection-dot {
+      position: absolute;
+      right: 10px;
+      top: 8px;
+      width: 6px; height: 6px;
       border-radius: 50%;
       background: transparent;
-      flex-shrink: 0;
       transition: background .3s;
+      pointer-events: none;
     }
-    .dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
-    .dot.connected { background: #22c55e; }
-    .dot.error { background: #ef4444; }
+    #connection-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+    #connection-dot.connected { background: #22c55e; }
+    #connection-dot.error { background: #ef4444; }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
@@ -56,6 +59,7 @@
       border-bottom: 1px solid rgba(255,255,255,0.08);
       flex-shrink: 0;
       height: 46px;
+      position: relative;
     }
 
     .spacer { flex: 1; min-width: 2px; }

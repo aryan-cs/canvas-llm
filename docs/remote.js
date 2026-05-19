@@ -5346,7 +5346,7 @@
     }
   }, { passive: false });
   function setConnectionStatus(state) {
-    connectionDot.className = "dot" + (state ? " " + state : "");
+    connectionDot.className = state || "";
   }
   function applySettings(settings) {
     _suppressSettingsSync = true;

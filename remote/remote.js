@@ -240,7 +240,7 @@ document.addEventListener('touchmove', (e) => {
 
 /* ── PeerJS connection ── */
 function setConnectionStatus(state) {
-  connectionDot.className = 'dot' + (state ? ' ' + state : '');
+  connectionDot.className = state || '';
 }
 
 function applySettings(settings) {
