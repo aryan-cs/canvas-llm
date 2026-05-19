@@ -1,0 +1,90 @@
+/* ── PeerJS Remote (phone side) ── */
+import Peer from 'peerjs';
+
+export class PeerRemote {
+  constructor(hostPeerId, opts = {}) {
+    this._hostPeerId = hostPeerId;
+    this.onStateChange = opts.onStateChange || (() => {});
+    this.onError = opts.onError || (() => {});
+    this.onAck = opts.onAck || (() => {});
+
+    this._peer = null;
+    this._conn = null;
+    this._state = 'idle';
+  }
+
+  getState() { return this._state; }
+
+  _setState(s) {
+    this._state = s;
+    this.onStateChange(s);
+  }
+
+  connect() {
+    return new Promise((resolve, reject) => {
+      this._setState('connecting');
+
+      this._peer = new Peer();
+
+      this._peer.on('open', () => {
+        // Now connect to the host
+        this._conn = this._peer.connect(this._hostPeerId, { reliable: true });
+
+        this._conn.on('open', () => {
+          this._setState('connected');
+          this._conn.send({ type: 'hello' });
+          resolve();
+        });
+
+        this._conn.on('data', (msg) => {
+          if (msg && msg.type === 'image-ack') {
+            this.onAck();
+          }
+        });
+
+        this._conn.on('close', () => {
+          this._conn = null;
+          this._setState('disconnected');
+        });
+
+        this._conn.on('error', (err) => {
+          this.onError(err);
+          this._setState('error');
+        });
+      });
+
+      this._peer.on('error', (err) => {
+        this.onError(err);
+        if (this._state === 'connecting') {
+          this._setState('error');
+          reject(err);
+        }
+      });
+
+      // Timeout after 15s
+      setTimeout(() => {
+        if (this._state === 'connecting') {
+          this._setState('error');
+          reject(new Error('Connection timed out'));
+        }
+      }, 15000);
+    });
+  }
+
+  async sendImage(blob) {
+    if (!this._conn || this._conn.open === false) {
+      throw new Error('Not connected');
+    }
+    this._setState('sending');
+    // Convert blob to ArrayBuffer for reliable transfer
+    const buf = await blob.arrayBuffer();
+    this._conn.send({ type: 'image', data: buf });
+    this._setState('connected');
+  }
+
+  disconnect() {
+    if (this._conn) { this._conn.close(); this._conn = null; }
+    if (this._peer) { this._peer.destroy(); this._peer = null; }
+    this._setState('disconnected');
+  }
+}

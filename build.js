@@ -4,10 +4,15 @@ const path = require('path');
 
 const watch = process.argv.includes('--watch');
 
-const copyFiles = [
+/* ── Static file copy lists ── */
+const extensionCopyFiles = [
   { from: 'manifest.json', to: 'dist/manifest.json' },
   { from: 'sidepanel.html', to: 'dist/sidepanel.html' },
   { from: 'icons', to: 'dist/icons' },
+];
+
+const remoteCopyFiles = [
+  { from: 'remote/remote.html', to: 'docs/index.html' },
 ];
 
 function copyDir(src, dest) {
@@ -23,8 +28,8 @@ function copyDir(src, dest) {
   }
 }
 
-function copyStatic() {
-  for (const { from, to } of copyFiles) {
+function copyStatic(fileList) {
+  for (const { from, to } of fileList) {
     const srcPath = path.resolve(__dirname, from);
     const destPath = path.resolve(__dirname, to);
     if (!fs.existsSync(srcPath)) continue;
@@ -37,7 +42,8 @@ function copyStatic() {
   }
 }
 
-const buildOptions = {
+/* ── Extension build (dist/) ── */
+const extensionBuild = {
   entryPoints: {
     content: 'src/content.js',
     background: 'src/background.js',
@@ -49,11 +55,32 @@ const buildOptions = {
   target: 'chrome120',
   sourcemap: watch ? 'inline' : false,
   plugins: [{
-    name: 'copy-static',
+    name: 'copy-extension-static',
     setup(build) {
       build.onEnd(() => {
-        copyStatic();
-        console.log('Build complete');
+        copyStatic(extensionCopyFiles);
+        console.log('Extension build complete');
+      });
+    },
+  }],
+};
+
+/* ── Remote page build (docs/) ── */
+const remoteBuild = {
+  entryPoints: {
+    remote: 'remote/remote.js',
+  },
+  bundle: true,
+  outdir: 'docs',
+  format: 'iife',
+  target: ['chrome100', 'safari15', 'firefox100'],
+  sourcemap: watch ? 'inline' : false,
+  plugins: [{
+    name: 'copy-remote-static',
+    setup(build) {
+      build.onEnd(() => {
+        copyStatic(remoteCopyFiles);
+        console.log('Remote page build complete');
       });
     },
   }],
@@ -61,11 +88,16 @@ const buildOptions = {
 
 async function main() {
   if (watch) {
-    const ctx = await esbuild.context(buildOptions);
-    await ctx.watch();
+    const extCtx = await esbuild.context(extensionBuild);
+    const remoteCtx = await esbuild.context(remoteBuild);
+    await extCtx.watch();
+    await remoteCtx.watch();
     console.log('Watching for changes...');
   } else {
-    await esbuild.build(buildOptions);
+    await Promise.all([
+      esbuild.build(extensionBuild),
+      esbuild.build(remoteBuild),
+    ]);
   }
 }
 
