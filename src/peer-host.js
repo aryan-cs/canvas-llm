@@ -8,6 +8,8 @@ export class PeerHost {
     this.onDrawEvent = opts.onDrawEvent || (() => {});
     this.onPasteRequest = opts.onPasteRequest || (() => {});
     this.onAction = opts.onAction || (() => {});
+    this.onSettings = opts.onSettings || (() => {});
+    this.onRemoteConnected = opts.onRemoteConnected || (() => {});
     this.onError = opts.onError || (() => {});
 
     this._peer = null;
@@ -60,11 +62,15 @@ export class PeerHost {
             this.onDrawEvent(msg.event);
           } else if (msg && msg.type === 'action' && msg.action) {
             this.onAction(msg.action);
+          } else if (msg && msg.type === 'settings' && msg.settings) {
+            this.onSettings(msg.settings);
           } else if (msg && msg.type === 'paste') {
             this.onPasteRequest();
             try { conn.send({ type: 'paste-ack' }); } catch {}
           } else if (msg && msg.type === 'hello') {
             try { conn.send({ type: 'welcome' }); } catch {}
+            // Notify host so it can send initial state
+            this.onRemoteConnected();
           }
         });
 
@@ -104,6 +110,18 @@ export class PeerHost {
   sendAction(action) {
     if (this._conn && this._conn.open) {
       this._conn.send({ type: 'action', action });
+    }
+  }
+
+  sendSettings(settings) {
+    if (this._conn && this._conn.open) {
+      this._conn.send({ type: 'settings', settings });
+    }
+  }
+
+  sendInit(canvasDataUrl, settings) {
+    if (this._conn && this._conn.open) {
+      this._conn.send({ type: 'init', canvasData: canvasDataUrl, settings });
     }
   }
 

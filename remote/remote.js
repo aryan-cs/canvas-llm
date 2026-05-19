@@ -19,8 +19,7 @@ if (!hostPeerId) {
 const canvas = document.getElementById('drawing-canvas');
 const container = document.getElementById('canvas-wrap');
 const gridOverlay = document.getElementById('grid-overlay');
-const statusDot = document.getElementById('status-dot');
-const statusText = document.getElementById('status-text');
+const connectionDot = document.getElementById('connection-dot');
 const sendBtn = document.getElementById('send-btn');
 const drawBtn = document.getElementById('tool-draw');
 const eraseBtn = document.getElementById('tool-erase');
@@ -71,6 +70,15 @@ undoBtn.onclick = () => { engine.undo(); sendActionToHost('undo'); };
 redoBtn.onclick = () => { engine.redo(); sendActionToHost('redo'); };
 clearBtn.onclick = () => { engine.clear(); sendActionToHost('clear'); };
 
+/* ── Settings sync helper ── */
+let _suppressSettingsSync = false;
+function sendSettingsToHost() {
+  if (_suppressSettingsSync) return;
+  if (peer && peer.getState() === 'connected') {
+    peer.sendSettings({ bg: engine.background, grid: gridOn, gridSize });
+  }
+}
+
 slider.addEventListener('input', e => {
   const s = +e.target.value;
   engine.setBrushSize(s);
@@ -109,19 +117,21 @@ function setBg(bg, repaint) {
   updateGrid();
 }
 
-bgWhiteBtn.onclick = () => setBg('#ffffff', true);
-bgBlackBtn.onclick = () => setBg('#000000', true);
+bgWhiteBtn.onclick = () => { setBg('#ffffff', true); sendSettingsToHost(); };
+bgBlackBtn.onclick = () => { setBg('#000000', true); sendSettingsToHost(); };
 
 gridToggle.onclick = () => {
   gridOn = !gridOn;
   gridToggle.classList.toggle('on', gridOn);
   updateGrid();
+  sendSettingsToHost();
 };
 
 gridSizeSlider.addEventListener('input', (e) => {
   gridSize = +e.target.value;
   gridSizeVal.textContent = gridSize;
   updateGrid();
+  sendSettingsToHost();
 });
 
 function updateGrid() {
@@ -229,35 +239,56 @@ document.addEventListener('touchmove', (e) => {
 }, { passive: false });
 
 /* ── PeerJS connection ── */
-function setConnectionStatus(state, text) {
-  statusDot.className = 'status-dot ' + state;
-  statusText.textContent = text;
+function setConnectionStatus(state) {
+  connectionDot.className = 'dot' + (state ? ' ' + state : '');
+}
+
+function applySettings(settings) {
+  _suppressSettingsSync = true;
+  if (settings.bg) setBg(settings.bg, true);
+  if (settings.grid !== undefined) {
+    gridOn = settings.grid;
+    gridToggle.classList.toggle('on', gridOn);
+    updateGrid();
+  }
+  if (settings.gridSize !== undefined) {
+    gridSize = settings.gridSize;
+    gridSizeSlider.value = gridSize;
+    gridSizeVal.textContent = gridSize;
+    updateGrid();
+  }
+  _suppressSettingsSync = false;
+}
+
+function applyInitCanvas(canvasDataUrl) {
+  if (!canvasDataUrl) return;
+  engine.loadImage(canvasDataUrl);
 }
 
 async function connectToPeer() {
   if (!hostPeerId) return;
 
-  setConnectionStatus('connecting', 'Connecting...');
+  setConnectionStatus('connecting');
 
   peer = new PeerRemote(hostPeerId, {
     onStateChange: (state) => {
       switch (state) {
         case 'connecting':
-          setConnectionStatus('connecting', 'Connecting...');
+          setConnectionStatus('connecting');
           break;
         case 'connected':
-          setConnectionStatus('connected', 'Connected');
+          setConnectionStatus('connected');
           sendBtn.disabled = false;
           break;
         case 'sending':
-          setConnectionStatus('connected', 'Sending...');
+          setConnectionStatus('connected');
           break;
         case 'disconnected':
-          setConnectionStatus('', 'Disconnected');
+          setConnectionStatus('');
           sendBtn.disabled = true;
           break;
         case 'error':
-          setConnectionStatus('error', 'Connection lost');
+          setConnectionStatus('error');
           sendBtn.disabled = true;
           break;
       }
@@ -277,6 +308,13 @@ async function connectToPeer() {
     onDrawEvent: (event) => {
       engine.remoteStroke(event);
     },
+    onSettings: (settings) => {
+      applySettings(settings);
+    },
+    onInit: (canvasData, settings) => {
+      if (settings) applySettings(settings);
+      if (canvasData) applyInitCanvas(canvasData);
+    },
     onError: (err) => {
       console.error('PeerRemote error:', err);
     },
@@ -285,7 +323,7 @@ async function connectToPeer() {
   try {
     await peer.connect();
   } catch (e) {
-    setConnectionStatus('error', 'Failed to connect');
+    setConnectionStatus('error');
     errorTitle.textContent = 'Connection Failed';
     errorMsg.textContent = 'Could not connect to the extension. Make sure the sharing session is still active and try scanning the QR code again.';
     errorOverlay.classList.remove('hidden');

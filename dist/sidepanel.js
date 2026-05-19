@@ -2735,6 +2735,7 @@
       this.onDrawEvent = opts.onDrawEvent || null;
       this._isDrawing = false;
       this._lastPt = null;
+      this._activePointerId = null;
       this._undoStack = [];
       this._undoIdx = -1;
       this._remoteLast = null;
@@ -2871,7 +2872,31 @@
       this._isDrawing = false;
       this._lastPt = null;
       this.ctx.globalCompositeOperation = "source-over";
+      if (this._activePointerId != null) {
+        try {
+          this.canvas.releasePointerCapture(this._activePointerId);
+        } catch {
+        }
+        this._activePointerId = null;
+      }
       if (this._undoIdx >= 0) this._restoreUndo();
+    }
+    /* ── Load an image onto the canvas ── */
+    loadImage(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const { ctx, canvas: canvas2 } = this;
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(img, 0, 0, canvas2.width, canvas2.height);
+          ctx.restore();
+          this.pushUndo();
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = dataUrl;
+      });
     }
     /* ── Export ── */
     toDataURL() {
@@ -2956,10 +2981,12 @@
     }
     _onDown(e) {
       if (this.paused || e.button !== 0) return;
+      if (this._isDrawing) return;
       e.preventDefault();
       const p = this._pt(e);
       this._isDrawing = true;
       this._lastPt = p;
+      this._activePointerId = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);
       const { ctx } = this;
       ctx.globalCompositeOperation = this.tool === "erase" ? "destination-out" : "source-over";
@@ -2985,6 +3012,7 @@
     }
     _onMove(e) {
       if (!this._isDrawing || this.paused) return;
+      if (e.pointerId !== this._activePointerId) return;
       e.preventDefault();
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
@@ -3006,8 +3034,10 @@
     }
     _onUp(e) {
       if (!this._isDrawing) return;
+      if (e.pointerId !== this._activePointerId) return;
       this._isDrawing = false;
       this._lastPt = null;
+      this._activePointerId = null;
       this.canvas.releasePointerCapture(e.pointerId);
       this.ctx.globalCompositeOperation = "source-over";
       this.pushUndo();
@@ -7076,6 +7106,10 @@
       });
       this.onAction = opts.onAction || (() => {
       });
+      this.onSettings = opts.onSettings || (() => {
+      });
+      this.onRemoteConnected = opts.onRemoteConnected || (() => {
+      });
       this.onError = opts.onError || (() => {
       });
       this._peer = null;
@@ -7126,6 +7160,8 @@
               this.onDrawEvent(msg.event);
             } else if (msg && msg.type === "action" && msg.action) {
               this.onAction(msg.action);
+            } else if (msg && msg.type === "settings" && msg.settings) {
+              this.onSettings(msg.settings);
             } else if (msg && msg.type === "paste") {
               this.onPasteRequest();
               try {
@@ -7137,6 +7173,7 @@
                 conn.send({ type: "welcome" });
               } catch {
               }
+              this.onRemoteConnected();
             }
           });
           conn.on("close", () => {
@@ -7169,6 +7206,16 @@
     sendAction(action) {
       if (this._conn && this._conn.open) {
         this._conn.send({ type: "action", action });
+      }
+    }
+    sendSettings(settings) {
+      if (this._conn && this._conn.open) {
+        this._conn.send({ type: "settings", settings });
+      }
+    }
+    sendInit(canvasDataUrl, settings) {
+      if (this._conn && this._conn.open) {
+        this._conn.send({ type: "init", canvasData: canvasDataUrl, settings });
       }
     }
     stop() {
@@ -7350,8 +7397,21 @@
     updateGrid();
     save("canvas_bg_color", bg);
   }
-  bgWhiteBtn.onclick = () => setBg("#ffffff", true);
-  bgBlackBtn.onclick = () => setBg("#000000", true);
+  var _suppressSettingsSync = false;
+  function sendSettingsToRemote() {
+    if (_suppressSettingsSync) return;
+    if (peerHost && peerHost.getState() === "connected") {
+      peerHost.sendSettings({ bg: engine.background, grid: gridOn, gridSize });
+    }
+  }
+  bgWhiteBtn.onclick = () => {
+    setBg("#ffffff", true);
+    sendSettingsToRemote();
+  };
+  bgBlackBtn.onclick = () => {
+    setBg("#000000", true);
+    sendSettingsToRemote();
+  };
   var gridSizeSlider = document.getElementById("grid-size-slider");
   var gridSizeVal = document.getElementById("grid-size-val");
   gridToggle.onclick = () => {
@@ -7359,12 +7419,14 @@
     gridToggle.classList.toggle("on", gridOn);
     updateGrid();
     save("canvas_grid", gridOn);
+    sendSettingsToRemote();
   };
   gridSizeSlider.addEventListener("input", (e) => {
     gridSize = +e.target.value;
     gridSizeVal.textContent = gridSize;
     updateGrid();
     save("canvas_grid_size", gridSize);
+    sendSettingsToRemote();
   });
   function updateGrid() {
     if (gridOn) {
@@ -7442,6 +7504,28 @@
         if (action === "undo") engine.undo();
         else if (action === "redo") engine.redo();
         else if (action === "clear") engine.clear();
+      },
+      onSettings: (settings) => {
+        _suppressSettingsSync = true;
+        if (settings.bg) setBg(settings.bg, true);
+        if (settings.grid !== void 0) {
+          gridOn = settings.grid;
+          gridToggle.classList.toggle("on", gridOn);
+          updateGrid();
+          save("canvas_grid", gridOn);
+        }
+        if (settings.gridSize !== void 0) {
+          gridSize = settings.gridSize;
+          gridSizeSlider.value = gridSize;
+          gridSizeVal.textContent = gridSize;
+          updateGrid();
+          save("canvas_grid_size", gridSize);
+        }
+        _suppressSettingsSync = false;
+      },
+      onRemoteConnected: () => {
+        const settings = { bg: engine.background, grid: gridOn, gridSize };
+        peerHost.sendInit(engine.toDataURL(), settings);
       },
       onPasteRequest: async () => {
         try {

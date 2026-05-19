@@ -657,6 +657,7 @@
       this.onDrawEvent = opts.onDrawEvent || null;
       this._isDrawing = false;
       this._lastPt = null;
+      this._activePointerId = null;
       this._undoStack = [];
       this._undoIdx = -1;
       this._remoteLast = null;
@@ -793,7 +794,31 @@
       this._isDrawing = false;
       this._lastPt = null;
       this.ctx.globalCompositeOperation = "source-over";
+      if (this._activePointerId != null) {
+        try {
+          this.canvas.releasePointerCapture(this._activePointerId);
+        } catch {
+        }
+        this._activePointerId = null;
+      }
       if (this._undoIdx >= 0) this._restoreUndo();
+    }
+    /* ── Load an image onto the canvas ── */
+    loadImage(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const { ctx, canvas: canvas2 } = this;
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(img, 0, 0, canvas2.width, canvas2.height);
+          ctx.restore();
+          this.pushUndo();
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = dataUrl;
+      });
     }
     /* ── Export ── */
     toDataURL() {
@@ -878,10 +903,12 @@
     }
     _onDown(e) {
       if (this.paused || e.button !== 0) return;
+      if (this._isDrawing) return;
       e.preventDefault();
       const p = this._pt(e);
       this._isDrawing = true;
       this._lastPt = p;
+      this._activePointerId = e.pointerId;
       this.canvas.setPointerCapture(e.pointerId);
       const { ctx } = this;
       ctx.globalCompositeOperation = this.tool === "erase" ? "destination-out" : "source-over";
@@ -907,6 +934,7 @@
     }
     _onMove(e) {
       if (!this._isDrawing || this.paused) return;
+      if (e.pointerId !== this._activePointerId) return;
       e.preventDefault();
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
@@ -928,8 +956,10 @@
     }
     _onUp(e) {
       if (!this._isDrawing) return;
+      if (e.pointerId !== this._activePointerId) return;
       this._isDrawing = false;
       this._lastPt = null;
+      this._activePointerId = null;
       this.canvas.releasePointerCapture(e.pointerId);
       this.ctx.globalCompositeOperation = "source-over";
       this.pushUndo();
@@ -5001,6 +5031,10 @@
       });
       this.onDrawEvent = opts.onDrawEvent || (() => {
       });
+      this.onSettings = opts.onSettings || (() => {
+      });
+      this.onInit = opts.onInit || (() => {
+      });
       this._peer = null;
       this._conn = null;
       this._state = "idle";
@@ -5032,6 +5066,10 @@
               this.onAction(msg.action);
             } else if (msg && msg.type === "draw" && msg.event) {
               this.onDrawEvent(msg.event);
+            } else if (msg && msg.type === "settings" && msg.settings) {
+              this.onSettings(msg.settings);
+            } else if (msg && msg.type === "init") {
+              this.onInit(msg.canvasData, msg.settings);
             }
           });
           this._conn.on("close", () => {
@@ -5065,6 +5103,10 @@
     sendAction(action) {
       if (!this._conn || this._conn.open === false) return;
       this._conn.send({ type: "action", action });
+    }
+    sendSettings(settings) {
+      if (!this._conn || this._conn.open === false) return;
+      this._conn.send({ type: "settings", settings });
     }
     requestPaste() {
       if (!this._conn || this._conn.open === false) {
@@ -5108,8 +5150,7 @@
   var canvas = document.getElementById("drawing-canvas");
   var container = document.getElementById("canvas-wrap");
   var gridOverlay = document.getElementById("grid-overlay");
-  var statusDot = document.getElementById("status-dot");
-  var statusText = document.getElementById("status-text");
+  var connectionDot = document.getElementById("connection-dot");
   var sendBtn = document.getElementById("send-btn");
   var drawBtn = document.getElementById("tool-draw");
   var eraseBtn = document.getElementById("tool-erase");
@@ -5159,6 +5200,13 @@
     engine.clear();
     sendActionToHost("clear");
   };
+  var _suppressSettingsSync = false;
+  function sendSettingsToHost() {
+    if (_suppressSettingsSync) return;
+    if (peer && peer.getState() === "connected") {
+      peer.sendSettings({ bg: engine.background, grid: gridOn, gridSize });
+    }
+  }
   slider.addEventListener("input", (e) => {
     const s = +e.target.value;
     engine.setBrushSize(s);
@@ -5191,17 +5239,25 @@
     }
     updateGrid();
   }
-  bgWhiteBtn.onclick = () => setBg("#ffffff", true);
-  bgBlackBtn.onclick = () => setBg("#000000", true);
+  bgWhiteBtn.onclick = () => {
+    setBg("#ffffff", true);
+    sendSettingsToHost();
+  };
+  bgBlackBtn.onclick = () => {
+    setBg("#000000", true);
+    sendSettingsToHost();
+  };
   gridToggle.onclick = () => {
     gridOn = !gridOn;
     gridToggle.classList.toggle("on", gridOn);
     updateGrid();
+    sendSettingsToHost();
   };
   gridSizeSlider.addEventListener("input", (e) => {
     gridSize = +e.target.value;
     gridSizeVal.textContent = gridSize;
     updateGrid();
+    sendSettingsToHost();
   });
   function updateGrid() {
     if (gridOn) {
@@ -5289,32 +5345,51 @@
       if (!gestureActive) e.preventDefault();
     }
   }, { passive: false });
-  function setConnectionStatus(state, text) {
-    statusDot.className = "status-dot " + state;
-    statusText.textContent = text;
+  function setConnectionStatus(state) {
+    connectionDot.className = "dot" + (state ? " " + state : "");
+  }
+  function applySettings(settings) {
+    _suppressSettingsSync = true;
+    if (settings.bg) setBg(settings.bg, true);
+    if (settings.grid !== void 0) {
+      gridOn = settings.grid;
+      gridToggle.classList.toggle("on", gridOn);
+      updateGrid();
+    }
+    if (settings.gridSize !== void 0) {
+      gridSize = settings.gridSize;
+      gridSizeSlider.value = gridSize;
+      gridSizeVal.textContent = gridSize;
+      updateGrid();
+    }
+    _suppressSettingsSync = false;
+  }
+  function applyInitCanvas(canvasDataUrl) {
+    if (!canvasDataUrl) return;
+    engine.loadImage(canvasDataUrl);
   }
   async function connectToPeer() {
     if (!hostPeerId) return;
-    setConnectionStatus("connecting", "Connecting...");
+    setConnectionStatus("connecting");
     peer = new PeerRemote(hostPeerId, {
       onStateChange: (state) => {
         switch (state) {
           case "connecting":
-            setConnectionStatus("connecting", "Connecting...");
+            setConnectionStatus("connecting");
             break;
           case "connected":
-            setConnectionStatus("connected", "Connected");
+            setConnectionStatus("connected");
             sendBtn.disabled = false;
             break;
           case "sending":
-            setConnectionStatus("connected", "Sending...");
+            setConnectionStatus("connected");
             break;
           case "disconnected":
-            setConnectionStatus("", "Disconnected");
+            setConnectionStatus("");
             sendBtn.disabled = true;
             break;
           case "error":
-            setConnectionStatus("error", "Connection lost");
+            setConnectionStatus("error");
             sendBtn.disabled = true;
             break;
         }
@@ -5334,6 +5409,13 @@
       onDrawEvent: (event) => {
         engine.remoteStroke(event);
       },
+      onSettings: (settings) => {
+        applySettings(settings);
+      },
+      onInit: (canvasData, settings) => {
+        if (settings) applySettings(settings);
+        if (canvasData) applyInitCanvas(canvasData);
+      },
       onError: (err) => {
         console.error("PeerRemote error:", err);
       }
@@ -5341,7 +5423,7 @@
     try {
       await peer.connect();
     } catch (e) {
-      setConnectionStatus("error", "Failed to connect");
+      setConnectionStatus("error");
       errorTitle.textContent = "Connection Failed";
       errorMsg.textContent = "Could not connect to the extension. Make sure the sharing session is still active and try scanning the QR code again.";
       errorOverlay.classList.remove("hidden");

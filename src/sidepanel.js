@@ -152,8 +152,16 @@ function setBg(bg, repaint) {
   save('canvas_bg_color', bg);
 }
 
-bgWhiteBtn.onclick = () => setBg('#ffffff', true);
-bgBlackBtn.onclick = () => setBg('#000000', true);
+let _suppressSettingsSync = false;
+function sendSettingsToRemote() {
+  if (_suppressSettingsSync) return;
+  if (peerHost && peerHost.getState() === 'connected') {
+    peerHost.sendSettings({ bg: engine.background, grid: gridOn, gridSize });
+  }
+}
+
+bgWhiteBtn.onclick = () => { setBg('#ffffff', true); sendSettingsToRemote(); };
+bgBlackBtn.onclick = () => { setBg('#000000', true); sendSettingsToRemote(); };
 
 const gridSizeSlider = document.getElementById('grid-size-slider');
 const gridSizeVal = document.getElementById('grid-size-val');
@@ -163,6 +171,7 @@ gridToggle.onclick = () => {
   gridToggle.classList.toggle('on', gridOn);
   updateGrid();
   save('canvas_grid', gridOn);
+  sendSettingsToRemote();
 };
 
 gridSizeSlider.addEventListener('input', (e) => {
@@ -170,6 +179,7 @@ gridSizeSlider.addEventListener('input', (e) => {
   gridSizeVal.textContent = gridSize;
   updateGrid();
   save('canvas_grid_size', gridSize);
+  sendSettingsToRemote();
 });
 
 function updateGrid() {
@@ -253,6 +263,29 @@ async function startSharing() {
       if (action === 'undo') engine.undo();
       else if (action === 'redo') engine.redo();
       else if (action === 'clear') engine.clear();
+    },
+    onSettings: (settings) => {
+      _suppressSettingsSync = true;
+      if (settings.bg) setBg(settings.bg, true);
+      if (settings.grid !== undefined) {
+        gridOn = settings.grid;
+        gridToggle.classList.toggle('on', gridOn);
+        updateGrid();
+        save('canvas_grid', gridOn);
+      }
+      if (settings.gridSize !== undefined) {
+        gridSize = settings.gridSize;
+        gridSizeSlider.value = gridSize;
+        gridSizeVal.textContent = gridSize;
+        updateGrid();
+        save('canvas_grid_size', gridSize);
+      }
+      _suppressSettingsSync = false;
+    },
+    onRemoteConnected: () => {
+      // Send current canvas state + settings to newly connected remote
+      const settings = { bg: engine.background, grid: gridOn, gridSize };
+      peerHost.sendInit(engine.toDataURL(), settings);
     },
     onPasteRequest: async () => {
       try {

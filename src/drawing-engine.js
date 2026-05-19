@@ -16,6 +16,7 @@ export class DrawingEngine {
 
     this._isDrawing = false;
     this._lastPt = null;
+    this._activePointerId = null;
     this._undoStack = [];
     this._undoIdx = -1;
     this._remoteLast = null;
@@ -149,7 +150,30 @@ export class DrawingEngine {
     this._isDrawing = false;
     this._lastPt = null;
     this.ctx.globalCompositeOperation = 'source-over';
+    // Release pointer capture so touch events work for gestures
+    if (this._activePointerId != null) {
+      try { this.canvas.releasePointerCapture(this._activePointerId); } catch {}
+      this._activePointerId = null;
+    }
     if (this._undoIdx >= 0) this._restoreUndo();
+  }
+
+  /* ── Load an image onto the canvas ── */
+  loadImage(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const { ctx, canvas } = this;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        this.pushUndo();
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = dataUrl;
+    });
   }
 
   /* ── Export ── */
@@ -235,10 +259,13 @@ export class DrawingEngine {
 
   _onDown(e) {
     if (this.paused || e.button !== 0) return;
+    // Only handle first pointer — prevent second finger from starting a new stroke
+    if (this._isDrawing) return;
     e.preventDefault();
     const p = this._pt(e);
     this._isDrawing = true;
     this._lastPt = p;
+    this._activePointerId = e.pointerId;
     this.canvas.setPointerCapture(e.pointerId);
 
     const { ctx } = this;
@@ -268,6 +295,7 @@ export class DrawingEngine {
 
   _onMove(e) {
     if (!this._isDrawing || this.paused) return;
+    if (e.pointerId !== this._activePointerId) return;
     e.preventDefault();
     const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
@@ -291,8 +319,10 @@ export class DrawingEngine {
 
   _onUp(e) {
     if (!this._isDrawing) return;
+    if (e.pointerId !== this._activePointerId) return;
     this._isDrawing = false;
     this._lastPt = null;
+    this._activePointerId = null;
     this.canvas.releasePointerCapture(e.pointerId);
     this.ctx.globalCompositeOperation = 'source-over';
     this.pushUndo();

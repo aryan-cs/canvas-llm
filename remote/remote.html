@@ -29,28 +29,17 @@
       padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
-    /* ── Status bar ── */
-    #status-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 6px 12px;
-      background: #252525;
-      flex-shrink: 0;
-      font-size: 12px;
-      color: #999;
-    }
-    .status-dot {
-      width: 7px; height: 7px;
+    /* ── Connection dot ── */
+    .dot {
+      width: 8px; height: 8px;
       border-radius: 50%;
-      background: #555;
+      background: transparent;
       flex-shrink: 0;
       transition: background .3s;
     }
-    .status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
-    .status-dot.connected { background: #22c55e; }
-    .status-dot.error { background: #ef4444; }
+    .dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+    .dot.connected { background: #22c55e; }
+    .dot.error { background: #ef4444; }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
@@ -266,11 +255,6 @@
 </head>
 <body>
   <div id="app">
-    <div id="status-bar">
-      <span class="status-dot" id="status-dot"></span>
-      <span id="status-text">Connecting...</span>
-    </div>
-
     <div id="toolbar">
       <button id="tool-draw" class="btn active" title="Draw">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -312,6 +296,7 @@
           <path d="M2 4h12M2 8h12M2 12h12"/>
         </svg>
       </button>
+      <span id="connection-dot" class="dot"></span>
     </div>
 
     <dialog id="settings-dialog">
