@@ -118,7 +118,7 @@ container.addEventListener('wheel', (e) => {
   }
 
   engine.setViewTransform(viewScale, viewPanX, viewPanY);
-  // Read back clamped values
+  // Read back values (may shift due to canvas expansion)
   viewScale = engine._viewScale;
   viewPanX = engine._viewPanX;
   viewPanY = engine._viewPanY;

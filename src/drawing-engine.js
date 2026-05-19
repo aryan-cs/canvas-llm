@@ -122,11 +122,13 @@ export class DrawingEngine {
   /* ── Clear ── */
   clear() {
     const dpr = devicePixelRatio || 1;
-    const { ctx, container } = this;
+    const { ctx, canvas } = this;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const r = container.getBoundingClientRect();
+    // Fill entire canvas (which may be expanded beyond container)
+    const cssW = canvas.width / dpr;
+    const cssH = canvas.height / dpr;
     ctx.fillStyle = this.background;
-    ctx.fillRect(0, 0, r.width, r.height);
+    ctx.fillRect(0, 0, cssW, cssH);
     this.pushUndo();
   }
 
@@ -157,20 +159,111 @@ export class DrawingEngine {
 
   /* ── View transform (zoom / pan) ── */
   setViewTransform(scale, panX, panY) {
-    // Clamp: no zoom-out past 1x, max 5x
-    scale = Math.max(1, Math.min(5, scale));
-    // Clamp pan so canvas edges stay within viewport
-    const r = this.container.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) {
-      panX = Math.max(r.width * (1 - scale), Math.min(0, panX));
-      panY = Math.max(r.height * (1 - scale), Math.min(0, panY));
-    }
+    scale = Math.max(0.25, Math.min(5, scale));
     this._viewScale = scale;
     this._viewPanX = panX;
     this._viewPanY = panY;
+
+    // Expand canvas to cover visible area when zoomed out
+    this._expandCanvasForView();
+
     this.canvas.style.transformOrigin = '0 0';
     this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     this._updateGridTransform();
+  }
+
+  /* Grow the canvas backing store so the full visible area is drawable.
+     Adds a buffer (50% of container) so we don't re-expand on every wheel tick. */
+  _expandCanvasForView() {
+    const r = this.container.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return;
+    const dpr = devicePixelRatio || 1;
+
+    // Visible area in canvas-local coordinates
+    const visLeft = -this._viewPanX / this._viewScale;
+    const visTop = -this._viewPanY / this._viewScale;
+    const visRight = visLeft + r.width / this._viewScale;
+    const visBottom = visTop + r.height / this._viewScale;
+
+    // Current canvas bounds in CSS pixels
+    const curW = this.canvas.width / dpr;
+    const curH = this.canvas.height / dpr;
+
+    // How much we need to expand in each direction
+    const expandLeft = Math.max(0, -visLeft);
+    const expandTop = Math.max(0, -visTop);
+    const expandRight = Math.max(0, visRight - curW);
+    const expandBottom = Math.max(0, visBottom - curH);
+
+    if (expandLeft < 1 && expandTop < 1 && expandRight < 1 && expandBottom < 1) return;
+
+    // Add 50% buffer so we don't re-expand on every gesture tick
+    const bufW = r.width * 0.5 / this._viewScale;
+    const bufH = r.height * 0.5 / this._viewScale;
+
+    const totalLeft = Math.ceil(expandLeft + (expandLeft > 0 ? bufW : 0));
+    const totalTop = Math.ceil(expandTop + (expandTop > 0 ? bufH : 0));
+    const totalRight = Math.ceil(expandRight + (expandRight > 0 ? bufW : 0));
+    const totalBottom = Math.ceil(expandBottom + (expandBottom > 0 ? bufH : 0));
+
+    const newW = Math.ceil(curW + totalLeft + totalRight);
+    const newH = Math.ceil(curH + totalTop + totalBottom);
+    const offX = totalLeft;
+    const offY = totalTop;
+
+    // Save current content
+    const old = document.createElement('canvas');
+    old.width = this.canvas.width;
+    old.height = this.canvas.height;
+    old.getContext('2d').drawImage(this.canvas, 0, 0);
+
+    // Resize canvas
+    this.canvas.width = newW * dpr;
+    this.canvas.height = newH * dpr;
+    this.canvas.style.width = newW + 'px';
+    this.canvas.style.height = newH + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Fill with background
+    this.ctx.fillStyle = this.background;
+    this.ctx.fillRect(0, 0, newW, newH);
+
+    // Restore content at offset
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.drawImage(old, offX * dpr, offY * dpr);
+    this.ctx.restore();
+
+    // Translate existing undo snapshots into new dimensions
+    const newStack = [];
+    for (const snap of this._undoStack) {
+      const tmpC = document.createElement('canvas');
+      tmpC.width = newW * dpr;
+      tmpC.height = newH * dpr;
+      const tmpCtx = tmpC.getContext('2d');
+      // Fill background in new dimensions
+      tmpCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      tmpCtx.fillStyle = this.background;
+      tmpCtx.fillRect(0, 0, newW, newH);
+      // Paste old snapshot at offset
+      tmpCtx.setTransform(1, 0, 0, 1, 0, 0);
+      tmpCtx.putImageData(snap, offX * dpr, offY * dpr);
+      newStack.push(tmpCtx.getImageData(0, 0, newW * dpr, newH * dpr));
+    }
+    this._undoStack = newStack;
+    // Push current state as latest undo entry (replacing the old top if it matches)
+    if (this._undoIdx >= this._undoStack.length) this._undoIdx = this._undoStack.length - 1;
+    // Add new snapshot of the current expanded canvas
+    this._undoStack = this._undoStack.slice(0, this._undoIdx + 1);
+    this._undoStack.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height));
+    if (this._undoStack.length > MAX_HISTORY) this._undoStack.shift();
+    this._undoIdx = this._undoStack.length - 1;
+
+    // Shift the pan to compensate for the canvas origin moving
+    if (offX > 0 || offY > 0) {
+      this._viewPanX += offX * this._viewScale;
+      this._viewPanY += offY * this._viewScale;
+    }
   }
 
   resetView() {
@@ -259,7 +352,10 @@ export class DrawingEngine {
     // Draw source canvas with current view transform
     ctx.translate(this._viewPanX, this._viewPanY);
     ctx.scale(this._viewScale, this._viewScale);
-    ctx.drawImage(this.canvas, 0, 0, r.width, r.height);
+    // Use actual canvas CSS dimensions (may be larger than container after expansion)
+    const cssW = this.canvas.width / dpr;
+    const cssH = this.canvas.height / dpr;
+    ctx.drawImage(this.canvas, 0, 0, cssW, cssH);
     return tmp;
   }
 

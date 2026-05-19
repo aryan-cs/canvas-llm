@@ -2845,11 +2845,12 @@
     /* ── Clear ── */
     clear() {
       const dpr = devicePixelRatio || 1;
-      const { ctx, container: container2 } = this;
+      const { ctx, canvas: canvas2 } = this;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const r = container2.getBoundingClientRect();
+      const cssW = canvas2.width / dpr;
+      const cssH = canvas2.height / dpr;
       ctx.fillStyle = this.background;
-      ctx.fillRect(0, 0, r.width, r.height);
+      ctx.fillRect(0, 0, cssW, cssH);
       this.pushUndo();
     }
     /* ── Background switching ── */
@@ -2879,18 +2880,80 @@
     }
     /* ── View transform (zoom / pan) ── */
     setViewTransform(scale, panX, panY) {
-      scale = Math.max(1, Math.min(5, scale));
-      const r = this.container.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        panX = Math.max(r.width * (1 - scale), Math.min(0, panX));
-        panY = Math.max(r.height * (1 - scale), Math.min(0, panY));
-      }
+      scale = Math.max(0.25, Math.min(5, scale));
       this._viewScale = scale;
       this._viewPanX = panX;
       this._viewPanY = panY;
+      this._expandCanvasForView();
       this.canvas.style.transformOrigin = "0 0";
       this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
       this._updateGridTransform();
+    }
+    /* Grow the canvas backing store so the full visible area is drawable.
+       Adds a buffer (50% of container) so we don't re-expand on every wheel tick. */
+    _expandCanvasForView() {
+      const r = this.container.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const dpr = devicePixelRatio || 1;
+      const visLeft = -this._viewPanX / this._viewScale;
+      const visTop = -this._viewPanY / this._viewScale;
+      const visRight = visLeft + r.width / this._viewScale;
+      const visBottom = visTop + r.height / this._viewScale;
+      const curW = this.canvas.width / dpr;
+      const curH = this.canvas.height / dpr;
+      const expandLeft = Math.max(0, -visLeft);
+      const expandTop = Math.max(0, -visTop);
+      const expandRight = Math.max(0, visRight - curW);
+      const expandBottom = Math.max(0, visBottom - curH);
+      if (expandLeft < 1 && expandTop < 1 && expandRight < 1 && expandBottom < 1) return;
+      const bufW = r.width * 0.5 / this._viewScale;
+      const bufH = r.height * 0.5 / this._viewScale;
+      const totalLeft = Math.ceil(expandLeft + (expandLeft > 0 ? bufW : 0));
+      const totalTop = Math.ceil(expandTop + (expandTop > 0 ? bufH : 0));
+      const totalRight = Math.ceil(expandRight + (expandRight > 0 ? bufW : 0));
+      const totalBottom = Math.ceil(expandBottom + (expandBottom > 0 ? bufH : 0));
+      const newW = Math.ceil(curW + totalLeft + totalRight);
+      const newH = Math.ceil(curH + totalTop + totalBottom);
+      const offX = totalLeft;
+      const offY = totalTop;
+      const old = document.createElement("canvas");
+      old.width = this.canvas.width;
+      old.height = this.canvas.height;
+      old.getContext("2d").drawImage(this.canvas, 0, 0);
+      this.canvas.width = newW * dpr;
+      this.canvas.height = newH * dpr;
+      this.canvas.style.width = newW + "px";
+      this.canvas.style.height = newH + "px";
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.ctx.fillStyle = this.background;
+      this.ctx.fillRect(0, 0, newW, newH);
+      this.ctx.save();
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.ctx.drawImage(old, offX * dpr, offY * dpr);
+      this.ctx.restore();
+      const newStack = [];
+      for (const snap of this._undoStack) {
+        const tmpC = document.createElement("canvas");
+        tmpC.width = newW * dpr;
+        tmpC.height = newH * dpr;
+        const tmpCtx = tmpC.getContext("2d");
+        tmpCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        tmpCtx.fillStyle = this.background;
+        tmpCtx.fillRect(0, 0, newW, newH);
+        tmpCtx.setTransform(1, 0, 0, 1, 0, 0);
+        tmpCtx.putImageData(snap, offX * dpr, offY * dpr);
+        newStack.push(tmpCtx.getImageData(0, 0, newW * dpr, newH * dpr));
+      }
+      this._undoStack = newStack;
+      if (this._undoIdx >= this._undoStack.length) this._undoIdx = this._undoStack.length - 1;
+      this._undoStack = this._undoStack.slice(0, this._undoIdx + 1);
+      this._undoStack.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height));
+      if (this._undoStack.length > MAX_HISTORY) this._undoStack.shift();
+      this._undoIdx = this._undoStack.length - 1;
+      if (offX > 0 || offY > 0) {
+        this._viewPanX += offX * this._viewScale;
+        this._viewPanY += offY * this._viewScale;
+      }
     }
     resetView() {
       this.setViewTransform(1, 0, 0);
@@ -2966,7 +3029,9 @@
       ctx.fillRect(0, 0, r.width, r.height);
       ctx.translate(this._viewPanX, this._viewPanY);
       ctx.scale(this._viewScale, this._viewScale);
-      ctx.drawImage(this.canvas, 0, 0, r.width, r.height);
+      const cssW = this.canvas.width / dpr;
+      const cssH = this.canvas.height / dpr;
+      ctx.drawImage(this.canvas, 0, 0, cssW, cssH);
       return tmp;
     }
     /* ── Remote stroke replay ── */
