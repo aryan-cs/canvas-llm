@@ -13,6 +13,7 @@ export class PeerRemote {
     this.onSettings = opts.onSettings || (() => {});
     this.onView = opts.onView || (() => {});
     this.onInit = opts.onInit || (() => {});
+    this.onPasteAvailable = opts.onPasteAvailable || (() => {});
 
     this._peer = null;
     this._conn = null;
@@ -57,6 +58,8 @@ export class PeerRemote {
             this.onView(msg.view);
           } else if (msg && msg.type === 'init') {
             this.onInit(msg.strokes, msg.settings);
+          } else if (msg && msg.type === 'paste-available') {
+            this.onPasteAvailable(!!msg.available);
           }
         });
 

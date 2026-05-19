@@ -145,6 +145,12 @@ export class PeerHost {
     }
   }
 
+  sendPasteAvailable(available) {
+    if (this._conn && this._conn.open) {
+      this._conn.send({ type: 'paste-available', available: !!available });
+    }
+  }
+
   stop() {
     if (this._conn) {
       this._conn.close();

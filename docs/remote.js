@@ -5096,6 +5096,8 @@
       });
       this.onInit = opts.onInit || (() => {
       });
+      this.onPasteAvailable = opts.onPasteAvailable || (() => {
+      });
       this._peer = null;
       this._conn = null;
       this._state = "idle";
@@ -5133,6 +5135,8 @@
               this.onView(msg.view);
             } else if (msg && msg.type === "init") {
               this.onInit(msg.strokes, msg.settings);
+            } else if (msg && msg.type === "paste-available") {
+              this.onPasteAvailable(!!msg.available);
             }
           });
           this._conn.on("close", () => {
@@ -5219,6 +5223,7 @@
   var gridOverlay = document.getElementById("grid-overlay");
   var connectionDot = document.getElementById("connection-dot");
   var sendBtn = document.getElementById("send-btn");
+  sendBtn.style.display = "none";
   var drawBtn = document.getElementById("tool-draw");
   var eraseBtn = document.getElementById("tool-erase");
   var undoBtn = document.getElementById("tool-undo");
@@ -5448,10 +5453,12 @@
           case "disconnected":
             setConnectionStatus("");
             sendBtn.disabled = true;
+            sendBtn.style.display = "none";
             break;
           case "error":
             setConnectionStatus("error");
             sendBtn.disabled = true;
+            sendBtn.style.display = "none";
             break;
         }
       },
@@ -5486,6 +5493,9 @@
         viewPanX = engine._viewPanX;
         viewPanY = engine._viewPanY;
         _suppressViewSync = false;
+      },
+      onPasteAvailable: (available) => {
+        sendBtn.style.display = available ? "" : "none";
       },
       onInit: (strokes, settings) => {
         if (settings) applySettings(settings);

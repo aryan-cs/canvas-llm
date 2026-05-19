@@ -7295,6 +7295,11 @@
         this._conn.send({ type: "init", strokes, settings });
       }
     }
+    sendPasteAvailable(available) {
+      if (this._conn && this._conn.open) {
+        this._conn.send({ type: "paste-available", available: !!available });
+      }
+    }
     stop() {
       if (this._conn) {
         this._conn.close();
@@ -7477,6 +7482,43 @@
       }, 2500);
     }
   }
+  var SUPPORTED_HOSTS = /* @__PURE__ */ new Set([
+    "claude.ai",
+    "chatgpt.com",
+    "chat.openai.com",
+    "gemini.google.com"
+  ]);
+  var _pasteAvailable = false;
+  async function isPasteAvailable() {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs?.[0];
+      if (!tab?.url) return false;
+      const host = new URL(tab.url).hostname;
+      return SUPPORTED_HOSTS.has(host);
+    } catch {
+      return false;
+    }
+  }
+  function setPasteBtnVisible(visible) {
+    pasteBtn.style.display = visible ? "" : "none";
+  }
+  async function refreshPasteAvailable() {
+    const available = await isPasteAvailable();
+    if (available === _pasteAvailable) return;
+    _pasteAvailable = available;
+    setPasteBtnVisible(available);
+    if (peerHost && peerHost.getState() === "connected") {
+      peerHost.sendPasteAvailable(available);
+    }
+  }
+  setPasteBtnVisible(false);
+  refreshPasteAvailable();
+  chrome.tabs?.onActivated.addListener(refreshPasteAvailable);
+  chrome.tabs?.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url || changeInfo.status === "complete") refreshPasteAvailable();
+  });
+  chrome.windows?.onFocusChanged?.addListener(refreshPasteAvailable);
   var settingsBtn = document.getElementById("tool-settings");
   var settingsDialog = document.getElementById("settings-dialog");
   var settingsClose = document.getElementById("settings-close");
@@ -7636,6 +7678,7 @@
         peerHost.sendInit(engine.serializeStrokes(), settings);
         const c = engine.getViewCenter();
         peerHost.sendView({ cx: c.x, cy: c.y, scale: c.scale });
+        peerHost.sendPasteAvailable(_pasteAvailable);
       },
       onPasteRequest: async () => {
         try {

@@ -21,6 +21,8 @@ const container = document.getElementById('canvas-wrap');
 const gridOverlay = document.getElementById('grid-overlay');
 const connectionDot = document.getElementById('connection-dot');
 const sendBtn = document.getElementById('send-btn');
+// Hidden until the host reports paste is available (i.e., host is on a supported chat site)
+sendBtn.style.display = 'none';
 const drawBtn = document.getElementById('tool-draw');
 const eraseBtn = document.getElementById('tool-erase');
 const undoBtn = document.getElementById('tool-undo');
@@ -279,10 +281,12 @@ async function connectToPeer() {
         case 'disconnected':
           setConnectionStatus('');
           sendBtn.disabled = true;
+          sendBtn.style.display = 'none';
           break;
         case 'error':
           setConnectionStatus('error');
           sendBtn.disabled = true;
+          sendBtn.style.display = 'none';
           break;
       }
     },
@@ -318,6 +322,9 @@ async function connectToPeer() {
       viewPanX = engine._viewPanX;
       viewPanY = engine._viewPanY;
       _suppressViewSync = false;
+    },
+    onPasteAvailable: (available) => {
+      sendBtn.style.display = available ? '' : 'none';
     },
     onInit: (strokes, settings) => {
       if (settings) applySettings(settings);
