@@ -4997,6 +4997,10 @@
       });
       this.onPasteAck = opts.onPasteAck || (() => {
       });
+      this.onAction = opts.onAction || (() => {
+      });
+      this.onDrawEvent = opts.onDrawEvent || (() => {
+      });
       this._peer = null;
       this._conn = null;
       this._state = "idle";
@@ -5024,6 +5028,10 @@
               this.onAck();
             } else if (msg && msg.type === "paste-ack") {
               this.onPasteAck();
+            } else if (msg && msg.type === "action" && msg.action) {
+              this.onAction(msg.action);
+            } else if (msg && msg.type === "draw" && msg.event) {
+              this.onDrawEvent(msg.event);
             }
           });
           this._conn.on("close", () => {
@@ -5053,6 +5061,10 @@
     sendDrawEvent(event) {
       if (!this._conn || this._conn.open === false) return;
       this._conn.send({ type: "draw", event });
+    }
+    sendAction(action) {
+      if (!this._conn || this._conn.open === false) return;
+      this._conn.send({ type: "action", action });
     }
     requestPaste() {
       if (!this._conn || this._conn.open === false) {
@@ -5129,10 +5141,24 @@
   }
   drawBtn.onclick = () => setTool(drawBtn, "draw");
   eraseBtn.onclick = () => setTool(eraseBtn, "erase");
+  function sendActionToHost(action) {
+    if (peer && peer.getState() === "connected") {
+      peer.sendAction(action);
+    }
+  }
   colorPicker.addEventListener("input", (e) => engine.setColor(e.target.value));
-  undoBtn.onclick = () => engine.undo();
-  redoBtn.onclick = () => engine.redo();
-  clearBtn.onclick = () => engine.clear();
+  undoBtn.onclick = () => {
+    engine.undo();
+    sendActionToHost("undo");
+  };
+  redoBtn.onclick = () => {
+    engine.redo();
+    sendActionToHost("redo");
+  };
+  clearBtn.onclick = () => {
+    engine.clear();
+    sendActionToHost("clear");
+  };
   slider.addEventListener("input", (e) => {
     const s = +e.target.value;
     engine.setBrushSize(s);
@@ -5299,6 +5325,14 @@
       onPasteAck: () => {
         showToast("Pasted into chat!", "success");
         sendBtn.disabled = false;
+      },
+      onAction: (action) => {
+        if (action === "undo") engine.undo();
+        else if (action === "redo") engine.redo();
+        else if (action === "clear") engine.clear();
+      },
+      onDrawEvent: (event) => {
+        engine.remoteStroke(event);
       },
       onError: (err) => {
         console.error("PeerRemote error:", err);

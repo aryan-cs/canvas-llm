@@ -8,6 +8,8 @@ export class PeerRemote {
     this.onError = opts.onError || (() => {});
     this.onAck = opts.onAck || (() => {});
     this.onPasteAck = opts.onPasteAck || (() => {});
+    this.onAction = opts.onAction || (() => {});
+    this.onDrawEvent = opts.onDrawEvent || (() => {});
 
     this._peer = null;
     this._conn = null;
@@ -42,6 +44,10 @@ export class PeerRemote {
             this.onAck();
           } else if (msg && msg.type === 'paste-ack') {
             this.onPasteAck();
+          } else if (msg && msg.type === 'action' && msg.action) {
+            this.onAction(msg.action);
+          } else if (msg && msg.type === 'draw' && msg.event) {
+            this.onDrawEvent(msg.event);
           }
         });
 
@@ -77,6 +83,11 @@ export class PeerRemote {
   sendDrawEvent(event) {
     if (!this._conn || this._conn.open === false) return;
     this._conn.send({ type: 'draw', event });
+  }
+
+  sendAction(action) {
+    if (!this._conn || this._conn.open === false) return;
+    this._conn.send({ type: 'action', action });
   }
 
   requestPaste() {

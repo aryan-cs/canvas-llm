@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Canvas — Remote Draw</title>
@@ -24,8 +24,9 @@
     #app {
       display: flex;
       flex-direction: column;
-      height: 100dvh;
       height: 100vh;
+      height: 100dvh;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
     /* ── Status bar ── */
@@ -131,7 +132,7 @@
     /* ── Floating send button ── */
     #send-btn {
       position: absolute;
-      bottom: max(14px, env(safe-area-inset-bottom, 14px));
+      bottom: 14px;
       right: 14px;
       width: 52px; height: 52px;
       border: none; border-radius: 50%;
@@ -150,7 +151,8 @@
     /* ── Status toast ── */
     #status-toast {
       position: absolute;
-      bottom: 76px; right: 14px;
+      bottom: 76px;
+      right: 14px;
       font-size: 12px; color: #888;
       background: rgba(30,30,30,0.9);
       padding: 4px 10px; border-radius: 6px;

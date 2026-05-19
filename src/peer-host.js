@@ -7,6 +7,7 @@ export class PeerHost {
     this.onImageReceived = opts.onImageReceived || (() => {});
     this.onDrawEvent = opts.onDrawEvent || (() => {});
     this.onPasteRequest = opts.onPasteRequest || (() => {});
+    this.onAction = opts.onAction || (() => {});
     this.onError = opts.onError || (() => {});
 
     this._peer = null;
@@ -57,6 +58,8 @@ export class PeerHost {
             });
           } else if (msg && msg.type === 'draw' && msg.event) {
             this.onDrawEvent(msg.event);
+          } else if (msg && msg.type === 'action' && msg.action) {
+            this.onAction(msg.action);
           } else if (msg && msg.type === 'paste') {
             this.onPasteRequest();
             try { conn.send({ type: 'paste-ack' }); } catch {}
@@ -90,6 +93,18 @@ export class PeerHost {
         }
       });
     });
+  }
+
+  sendDrawEvent(event) {
+    if (this._conn && this._conn.open) {
+      this._conn.send({ type: 'draw', event });
+    }
+  }
+
+  sendAction(action) {
+    if (this._conn && this._conn.open) {
+      this._conn.send({ type: 'action', action });
+    }
   }
 
   stop() {

@@ -9,8 +9,15 @@ const cursorRing = document.getElementById('cursor-ring');
 const gridOverlay = document.getElementById('grid-overlay');
 
 /* ── Drawing engine ── */
+let peerHost = null; // declared early for engine callback closure
+
 const engine = new DrawingEngine(canvas, container, {
   onHistoryChange: updateUndoRedo,
+  onDrawEvent: (event) => {
+    if (peerHost && peerHost.getState() === 'connected') {
+      peerHost.sendDrawEvent(event);
+    }
+  },
 });
 
 let gridOn = false;
@@ -47,12 +54,18 @@ function setTool(btn, t) {
   engine.setTool(t);
 }
 
+function sendActionToRemote(action) {
+  if (peerHost && peerHost.getState() === 'connected') {
+    peerHost.sendAction(action);
+  }
+}
+
 drawBtn.onclick = () => setTool(drawBtn, 'draw');
 eraseBtn.onclick = () => setTool(eraseBtn, 'erase');
 colorPicker.addEventListener('input', e => { engine.setColor(e.target.value); save('canvas_brush_color', e.target.value); });
-undoBtn.onclick = () => engine.undo();
-redoBtn.onclick = () => engine.redo();
-clearBtn.onclick = () => engine.clear();
+undoBtn.onclick = () => { engine.undo(); sendActionToRemote('undo'); };
+redoBtn.onclick = () => { engine.redo(); sendActionToRemote('redo'); };
+clearBtn.onclick = () => { engine.clear(); sendActionToRemote('clear'); };
 
 slider.addEventListener('input', e => {
   const s = +e.target.value;
@@ -69,8 +82,8 @@ function updateUndoRedo() {
 
 /* ── Keyboard shortcuts ── */
 document.addEventListener('keydown', e => {
-  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); engine.redo(); }
-  else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); engine.undo(); }
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); engine.redo(); sendActionToRemote('redo'); }
+  else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); engine.undo(); sendActionToRemote('undo'); }
   else if (e.key === 'd' && !e.ctrlKey && !e.metaKey) { drawBtn.click(); }
   else if (e.key === 'e' && !e.ctrlKey && !e.metaKey) { eraseBtn.click(); }
 });
@@ -182,8 +195,6 @@ const shareStopBtn = document.getElementById('share-stop');
 const connectionDot = document.getElementById('connection-dot');
 const shareDot = document.getElementById('share-dot');
 
-let peerHost = null;
-
 function setDots(cls) {
   connectionDot.className = 'dot' + (cls ? ' ' + cls : '');
   shareDot.className = 'dot' + (cls ? ' ' + cls : '');
@@ -237,6 +248,11 @@ async function startSharing() {
     },
     onDrawEvent: (event) => {
       engine.remoteStroke(event);
+    },
+    onAction: (action) => {
+      if (action === 'undo') engine.undo();
+      else if (action === 'redo') engine.redo();
+      else if (action === 'clear') engine.clear();
     },
     onPasteRequest: async () => {
       try {

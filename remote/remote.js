@@ -60,10 +60,16 @@ function setTool(btn, t) {
 
 drawBtn.onclick = () => setTool(drawBtn, 'draw');
 eraseBtn.onclick = () => setTool(eraseBtn, 'erase');
+function sendActionToHost(action) {
+  if (peer && peer.getState() === 'connected') {
+    peer.sendAction(action);
+  }
+}
+
 colorPicker.addEventListener('input', e => engine.setColor(e.target.value));
-undoBtn.onclick = () => engine.undo();
-redoBtn.onclick = () => engine.redo();
-clearBtn.onclick = () => engine.clear();
+undoBtn.onclick = () => { engine.undo(); sendActionToHost('undo'); };
+redoBtn.onclick = () => { engine.redo(); sendActionToHost('redo'); };
+clearBtn.onclick = () => { engine.clear(); sendActionToHost('clear'); };
 
 slider.addEventListener('input', e => {
   const s = +e.target.value;
@@ -262,6 +268,14 @@ async function connectToPeer() {
     onPasteAck: () => {
       showToast('Pasted into chat!', 'success');
       sendBtn.disabled = false;
+    },
+    onAction: (action) => {
+      if (action === 'undo') engine.undo();
+      else if (action === 'redo') engine.redo();
+      else if (action === 'clear') engine.clear();
+    },
+    onDrawEvent: (event) => {
+      engine.remoteStroke(event);
     },
     onError: (err) => {
       console.error('PeerRemote error:', err);

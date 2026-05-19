@@ -7074,6 +7074,8 @@
       });
       this.onPasteRequest = opts.onPasteRequest || (() => {
       });
+      this.onAction = opts.onAction || (() => {
+      });
       this.onError = opts.onError || (() => {
       });
       this._peer = null;
@@ -7122,6 +7124,8 @@
               });
             } else if (msg && msg.type === "draw" && msg.event) {
               this.onDrawEvent(msg.event);
+            } else if (msg && msg.type === "action" && msg.action) {
+              this.onAction(msg.action);
             } else if (msg && msg.type === "paste") {
               this.onPasteRequest();
               try {
@@ -7156,6 +7160,16 @@
           }
         });
       });
+    }
+    sendDrawEvent(event) {
+      if (this._conn && this._conn.open) {
+        this._conn.send({ type: "draw", event });
+      }
+    }
+    sendAction(action) {
+      if (this._conn && this._conn.open) {
+        this._conn.send({ type: "action", action });
+      }
     }
     stop() {
       if (this._conn) {
@@ -7193,8 +7207,14 @@
   var container = document.getElementById("canvas-wrap");
   var cursorRing = document.getElementById("cursor-ring");
   var gridOverlay = document.getElementById("grid-overlay");
+  var peerHost = null;
   var engine = new DrawingEngine(canvas, container, {
-    onHistoryChange: updateUndoRedo
+    onHistoryChange: updateUndoRedo,
+    onDrawEvent: (event) => {
+      if (peerHost && peerHost.getState() === "connected") {
+        peerHost.sendDrawEvent(event);
+      }
+    }
   });
   var gridOn = false;
   var gridSize = 50;
@@ -7223,15 +7243,29 @@
     btn.classList.add("active");
     engine.setTool(t);
   }
+  function sendActionToRemote(action) {
+    if (peerHost && peerHost.getState() === "connected") {
+      peerHost.sendAction(action);
+    }
+  }
   drawBtn.onclick = () => setTool(drawBtn, "draw");
   eraseBtn.onclick = () => setTool(eraseBtn, "erase");
   colorPicker.addEventListener("input", (e) => {
     engine.setColor(e.target.value);
     save("canvas_brush_color", e.target.value);
   });
-  undoBtn.onclick = () => engine.undo();
-  redoBtn.onclick = () => engine.redo();
-  clearBtn.onclick = () => engine.clear();
+  undoBtn.onclick = () => {
+    engine.undo();
+    sendActionToRemote("undo");
+  };
+  redoBtn.onclick = () => {
+    engine.redo();
+    sendActionToRemote("redo");
+  };
+  clearBtn.onclick = () => {
+    engine.clear();
+    sendActionToRemote("clear");
+  };
   slider.addEventListener("input", (e) => {
     const s = +e.target.value;
     engine.setBrushSize(s);
@@ -7247,9 +7281,11 @@
     if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
       e.preventDefault();
       engine.redo();
+      sendActionToRemote("redo");
     } else if (e.key === "z" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       engine.undo();
+      sendActionToRemote("undo");
     } else if (e.key === "d" && !e.ctrlKey && !e.metaKey) {
       drawBtn.click();
     } else if (e.key === "e" && !e.ctrlKey && !e.metaKey) {
@@ -7349,7 +7385,6 @@
   var shareStopBtn = document.getElementById("share-stop");
   var connectionDot = document.getElementById("connection-dot");
   var shareDot = document.getElementById("share-dot");
-  var peerHost = null;
   function setDots(cls) {
     connectionDot.className = "dot" + (cls ? " " + cls : "");
     shareDot.className = "dot" + (cls ? " " + cls : "");
@@ -7402,6 +7437,11 @@
       },
       onDrawEvent: (event) => {
         engine.remoteStroke(event);
+      },
+      onAction: (action) => {
+        if (action === "undo") engine.undo();
+        else if (action === "redo") engine.redo();
+        else if (action === "clear") engine.clear();
       },
       onPasteRequest: async () => {
         try {
