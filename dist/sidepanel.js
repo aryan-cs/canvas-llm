@@ -2738,6 +2738,10 @@
       this._undoStack = [];
       this._undoIdx = -1;
       this._remoteLast = null;
+      this.paused = false;
+      this._viewScale = 1;
+      this._viewPanX = 0;
+      this._viewPanY = 0;
       this._onDown = this._onDown.bind(this);
       this._onMove = this._onMove.bind(this);
       this._onUp = this._onUp.bind(this);
@@ -2851,6 +2855,24 @@
         this.pushUndo();
       }
     }
+    /* ── View transform (zoom / pan) ── */
+    setViewTransform(scale, panX, panY) {
+      this._viewScale = scale;
+      this._viewPanX = panX;
+      this._viewPanY = panY;
+      this.canvas.style.transformOrigin = "0 0";
+      this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+    resetView() {
+      this.setViewTransform(1, 0, 0);
+    }
+    cancelStroke() {
+      if (!this._isDrawing) return;
+      this._isDrawing = false;
+      this._lastPt = null;
+      this.ctx.globalCompositeOperation = "source-over";
+      if (this._undoIdx >= 0) this._restoreUndo();
+    }
     /* ── Export ── */
     toDataURL() {
       return this.canvas.toDataURL("image/png");
@@ -2926,11 +2948,14 @@
     }
     /* ── Pointer handlers ── */
     _pt(e) {
-      const r = this.canvas.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
+      const r = this.container.getBoundingClientRect();
+      return {
+        x: (e.clientX - r.left - this._viewPanX) / this._viewScale,
+        y: (e.clientY - r.top - this._viewPanY) / this._viewScale
+      };
     }
     _onDown(e) {
-      if (e.button !== 0) return;
+      if (this.paused || e.button !== 0) return;
       e.preventDefault();
       const p = this._pt(e);
       this._isDrawing = true;
@@ -2959,7 +2984,7 @@
       }
     }
     _onMove(e) {
-      if (!this._isDrawing) return;
+      if (!this._isDrawing || this.paused) return;
       e.preventDefault();
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;

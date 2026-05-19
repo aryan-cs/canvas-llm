@@ -660,6 +660,10 @@
       this._undoStack = [];
       this._undoIdx = -1;
       this._remoteLast = null;
+      this.paused = false;
+      this._viewScale = 1;
+      this._viewPanX = 0;
+      this._viewPanY = 0;
       this._onDown = this._onDown.bind(this);
       this._onMove = this._onMove.bind(this);
       this._onUp = this._onUp.bind(this);
@@ -773,6 +777,24 @@
         this.pushUndo();
       }
     }
+    /* ── View transform (zoom / pan) ── */
+    setViewTransform(scale, panX, panY) {
+      this._viewScale = scale;
+      this._viewPanX = panX;
+      this._viewPanY = panY;
+      this.canvas.style.transformOrigin = "0 0";
+      this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+    resetView() {
+      this.setViewTransform(1, 0, 0);
+    }
+    cancelStroke() {
+      if (!this._isDrawing) return;
+      this._isDrawing = false;
+      this._lastPt = null;
+      this.ctx.globalCompositeOperation = "source-over";
+      if (this._undoIdx >= 0) this._restoreUndo();
+    }
     /* ── Export ── */
     toDataURL() {
       return this.canvas.toDataURL("image/png");
@@ -848,11 +870,14 @@
     }
     /* ── Pointer handlers ── */
     _pt(e) {
-      const r = this.canvas.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
+      const r = this.container.getBoundingClientRect();
+      return {
+        x: (e.clientX - r.left - this._viewPanX) / this._viewScale,
+        y: (e.clientY - r.top - this._viewPanY) / this._viewScale
+      };
     }
     _onDown(e) {
-      if (e.button !== 0) return;
+      if (this.paused || e.button !== 0) return;
       e.preventDefault();
       const p = this._pt(e);
       this._isDrawing = true;
@@ -881,7 +906,7 @@
       }
     }
     _onMove(e) {
-      if (!this._isDrawing) return;
+      if (!this._isDrawing || this.paused) return;
       e.preventDefault();
       const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       const r = this.onDrawEvent ? this.container.getBoundingClientRect() : null;
@@ -5070,17 +5095,19 @@
   }
   var canvas = document.getElementById("drawing-canvas");
   var container = document.getElementById("canvas-wrap");
+  var gridOverlay = document.getElementById("grid-overlay");
   var statusDot = document.getElementById("status-dot");
   var statusText = document.getElementById("status-text");
   var sendBtn = document.getElementById("send-btn");
-  var clearBtn = document.getElementById("clear-btn");
   var drawBtn = document.getElementById("tool-draw");
   var eraseBtn = document.getElementById("tool-erase");
   var undoBtn = document.getElementById("tool-undo");
   var redoBtn = document.getElementById("tool-redo");
+  var clearBtn = document.getElementById("tool-clear");
   var colorPicker = document.getElementById("color-picker");
   var slider = document.getElementById("radius-slider");
   var sliderVal = document.getElementById("radius-val");
+  var toastEl = document.getElementById("status-toast");
   var peer = null;
   var engine = new DrawingEngine(canvas, container, {
     onHistoryChange: updateUndoRedo,
@@ -5111,47 +5138,166 @@
     engine.setBrushSize(s);
     sliderVal.textContent = s;
   });
-  document.addEventListener("touchmove", (e) => {
-    if (e.target === canvas || container.contains(e.target)) {
+  var settingsBtn = document.getElementById("tool-settings");
+  var settingsDialog = document.getElementById("settings-dialog");
+  var settingsClose = document.getElementById("settings-close");
+  var bgWhiteBtn = document.getElementById("bg-white");
+  var bgBlackBtn = document.getElementById("bg-black");
+  var gridToggle = document.getElementById("grid-toggle");
+  var gridSizeSlider = document.getElementById("grid-size-slider");
+  var gridSizeVal = document.getElementById("grid-size-val");
+  var gridOn = false;
+  var gridSize = 50;
+  settingsBtn.onclick = () => settingsDialog.showModal();
+  settingsClose.onclick = () => settingsDialog.close();
+  settingsDialog.addEventListener("click", (e) => {
+    if (e.target === settingsDialog) settingsDialog.close();
+  });
+  function setBg(bg, repaint) {
+    engine.setBackground(bg, repaint);
+    container.style.background = bg;
+    if (bg === "#ffffff") {
+      bgWhiteBtn.classList.add("selected");
+      bgBlackBtn.classList.remove("selected");
+    } else {
+      bgBlackBtn.classList.add("selected");
+      bgWhiteBtn.classList.remove("selected");
+    }
+    updateGrid();
+  }
+  bgWhiteBtn.onclick = () => setBg("#ffffff", true);
+  bgBlackBtn.onclick = () => setBg("#000000", true);
+  gridToggle.onclick = () => {
+    gridOn = !gridOn;
+    gridToggle.classList.toggle("on", gridOn);
+    updateGrid();
+  };
+  gridSizeSlider.addEventListener("input", (e) => {
+    gridSize = +e.target.value;
+    gridSizeVal.textContent = gridSize;
+    updateGrid();
+  });
+  function updateGrid() {
+    if (gridOn) {
+      const c = engine.background === "#000000" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
+      gridOverlay.style.backgroundImage = `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`;
+      gridOverlay.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+      gridOverlay.style.display = "block";
+    } else {
+      gridOverlay.style.display = "none";
+    }
+  }
+  function showToast(text, cls) {
+    toastEl.textContent = text;
+    toastEl.className = (cls || "") + " visible";
+    if (cls === "success" || cls === "error") {
+      setTimeout(() => {
+        toastEl.className = "";
+        toastEl.textContent = "";
+      }, 2500);
+    }
+  }
+  var gestureActive = false;
+  var lastTouches = null;
+  var viewScale = 1;
+  var viewPanX = 0;
+  var viewPanY = 0;
+  function getTouchData(touches) {
+    const r = container.getBoundingClientRect();
+    return Array.from(touches).map((t) => ({
+      x: t.clientX - r.left,
+      y: t.clientY - r.top
+    }));
+  }
+  container.addEventListener("touchstart", (e) => {
+    if (e.touches.length >= 2) {
+      gestureActive = true;
+      engine.paused = true;
+      engine.cancelStroke();
+      lastTouches = getTouchData(e.touches);
       e.preventDefault();
     }
   }, { passive: false });
-  function setStatus(state, text) {
+  container.addEventListener("touchmove", (e) => {
+    if (!gestureActive || e.touches.length < 2) return;
+    e.preventDefault();
+    const curr = getTouchData(e.touches);
+    const prev = lastTouches;
+    const prevDist = Math.hypot(prev[1].x - prev[0].x, prev[1].y - prev[0].y);
+    const currDist = Math.hypot(curr[1].x - curr[0].x, curr[1].y - curr[0].y);
+    const prevMidX = (prev[0].x + prev[1].x) / 2;
+    const prevMidY = (prev[0].y + prev[1].y) / 2;
+    const currMidX = (curr[0].x + curr[1].x) / 2;
+    const currMidY = (curr[0].y + curr[1].y) / 2;
+    const ds = prevDist > 0 ? currDist / prevDist : 1;
+    const newScale = Math.max(0.5, Math.min(5, viewScale * ds));
+    viewPanX = currMidX - (prevMidX - viewPanX) * (newScale / viewScale);
+    viewPanY = currMidY - (prevMidY - viewPanY) * (newScale / viewScale);
+    viewScale = newScale;
+    engine.setViewTransform(viewScale, viewPanX, viewPanY);
+    lastTouches = curr;
+  }, { passive: false });
+  container.addEventListener("touchend", (e) => {
+    if (gestureActive && e.touches.length < 2) {
+      gestureActive = false;
+      lastTouches = null;
+      setTimeout(() => {
+        engine.paused = false;
+      }, 80);
+    }
+  });
+  var lastTap = 0;
+  container.addEventListener("touchend", (e) => {
+    if (e.touches.length !== 0) return;
+    const now = Date.now();
+    if (now - lastTap < 300 && viewScale !== 1) {
+      viewScale = 1;
+      viewPanX = 0;
+      viewPanY = 0;
+      engine.resetView();
+    }
+    lastTap = now;
+  });
+  document.addEventListener("touchmove", (e) => {
+    if (e.target === canvas || container.contains(e.target)) {
+      if (!gestureActive) e.preventDefault();
+    }
+  }, { passive: false });
+  function setConnectionStatus(state, text) {
     statusDot.className = "status-dot " + state;
     statusText.textContent = text;
   }
   async function connectToPeer() {
     if (!hostPeerId) return;
-    setStatus("connecting", "Connecting...");
+    setConnectionStatus("connecting", "Connecting...");
     peer = new PeerRemote(hostPeerId, {
       onStateChange: (state) => {
         switch (state) {
           case "connecting":
-            setStatus("connecting", "Connecting...");
+            setConnectionStatus("connecting", "Connecting...");
             break;
           case "connected":
-            setStatus("connected", "Connected \u2014 draw and tap Send");
+            setConnectionStatus("connected", "Connected");
             sendBtn.disabled = false;
             break;
           case "sending":
-            setStatus("connected", "Sending...");
+            setConnectionStatus("connected", "Sending...");
             break;
           case "disconnected":
-            setStatus("", "Disconnected");
+            setConnectionStatus("", "Disconnected");
             sendBtn.disabled = true;
             break;
           case "error":
-            setStatus("error", "Connection lost");
+            setConnectionStatus("error", "Connection lost");
             sendBtn.disabled = true;
             break;
         }
       },
       onAck: () => {
-        setStatus("connected", "Sent! Draw another or close this page.");
         sendBtn.disabled = false;
       },
       onPasteAck: () => {
-        setStatus("connected", "Pasted into chat!");
+        showToast("Pasted into chat!", "success");
         sendBtn.disabled = false;
       },
       onError: (err) => {
@@ -5161,7 +5307,7 @@
     try {
       await peer.connect();
     } catch (e) {
-      setStatus("error", "Failed to connect");
+      setConnectionStatus("error", "Failed to connect");
       errorTitle.textContent = "Connection Failed";
       errorMsg.textContent = "Could not connect to the extension. Make sure the sharing session is still active and try scanning the QR code again.";
       errorOverlay.classList.remove("hidden");
@@ -5170,11 +5316,11 @@
   sendBtn.onclick = async () => {
     if (!peer || peer.getState() !== "connected") return;
     sendBtn.disabled = true;
-    setStatus("connected", "Pasting to chat...");
     try {
       peer.requestPaste();
+      showToast("Pasting...", "");
     } catch (e) {
-      setStatus("error", "Failed: " + e.message);
+      showToast("Failed: " + e.message, "error");
       sendBtn.disabled = false;
     }
   };

@@ -18,17 +18,19 @@ if (!hostPeerId) {
 /* ── DOM refs ── */
 const canvas = document.getElementById('drawing-canvas');
 const container = document.getElementById('canvas-wrap');
+const gridOverlay = document.getElementById('grid-overlay');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const sendBtn = document.getElementById('send-btn');
-const clearBtn = document.getElementById('clear-btn');
 const drawBtn = document.getElementById('tool-draw');
 const eraseBtn = document.getElementById('tool-erase');
 const undoBtn = document.getElementById('tool-undo');
 const redoBtn = document.getElementById('tool-redo');
+const clearBtn = document.getElementById('tool-clear');
 const colorPicker = document.getElementById('color-picker');
 const slider = document.getElementById('radius-slider');
 const sliderVal = document.getElementById('radius-val');
+const toastEl = document.getElementById('status-toast');
 
 /* ── PeerJS connection (declared early so engine callback can use it) ── */
 let peer = null;
@@ -69,15 +71,159 @@ slider.addEventListener('input', e => {
   sliderVal.textContent = s;
 });
 
-/* ── Prevent iOS bounce/zoom ── */
-document.addEventListener('touchmove', (e) => {
-  if (e.target === canvas || container.contains(e.target)) {
+/* ── Settings dialog ── */
+const settingsBtn = document.getElementById('tool-settings');
+const settingsDialog = document.getElementById('settings-dialog');
+const settingsClose = document.getElementById('settings-close');
+const bgWhiteBtn = document.getElementById('bg-white');
+const bgBlackBtn = document.getElementById('bg-black');
+const gridToggle = document.getElementById('grid-toggle');
+const gridSizeSlider = document.getElementById('grid-size-slider');
+const gridSizeVal = document.getElementById('grid-size-val');
+
+let gridOn = false;
+let gridSize = 50;
+
+settingsBtn.onclick = () => settingsDialog.showModal();
+settingsClose.onclick = () => settingsDialog.close();
+settingsDialog.addEventListener('click', (e) => {
+  if (e.target === settingsDialog) settingsDialog.close();
+});
+
+function setBg(bg, repaint) {
+  engine.setBackground(bg, repaint);
+  container.style.background = bg;
+  if (bg === '#ffffff') {
+    bgWhiteBtn.classList.add('selected');
+    bgBlackBtn.classList.remove('selected');
+  } else {
+    bgBlackBtn.classList.add('selected');
+    bgWhiteBtn.classList.remove('selected');
+  }
+  updateGrid();
+}
+
+bgWhiteBtn.onclick = () => setBg('#ffffff', true);
+bgBlackBtn.onclick = () => setBg('#000000', true);
+
+gridToggle.onclick = () => {
+  gridOn = !gridOn;
+  gridToggle.classList.toggle('on', gridOn);
+  updateGrid();
+};
+
+gridSizeSlider.addEventListener('input', (e) => {
+  gridSize = +e.target.value;
+  gridSizeVal.textContent = gridSize;
+  updateGrid();
+});
+
+function updateGrid() {
+  if (gridOn) {
+    const c = engine.background === '#000000' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    gridOverlay.style.backgroundImage =
+      `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`;
+    gridOverlay.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+    gridOverlay.style.display = 'block';
+  } else {
+    gridOverlay.style.display = 'none';
+  }
+}
+
+/* ── Status toast ── */
+function showToast(text, cls) {
+  toastEl.textContent = text;
+  toastEl.className = (cls || '') + ' visible';
+  if (cls === 'success' || cls === 'error') {
+    setTimeout(() => { toastEl.className = ''; toastEl.textContent = ''; }, 2500);
+  }
+}
+
+/* ── Pinch-to-zoom / two-finger pan ── */
+let gestureActive = false;
+let lastTouches = null;
+let viewScale = 1;
+let viewPanX = 0;
+let viewPanY = 0;
+
+function getTouchData(touches) {
+  const r = container.getBoundingClientRect();
+  return Array.from(touches).map(t => ({
+    x: t.clientX - r.left,
+    y: t.clientY - r.top,
+  }));
+}
+
+container.addEventListener('touchstart', (e) => {
+  if (e.touches.length >= 2) {
+    gestureActive = true;
+    engine.paused = true;
+    engine.cancelStroke();
+    lastTouches = getTouchData(e.touches);
     e.preventDefault();
   }
 }, { passive: false });
 
-/* ── Connection ── */
-function setStatus(state, text) {
+container.addEventListener('touchmove', (e) => {
+  if (!gestureActive || e.touches.length < 2) return;
+  e.preventDefault();
+
+  const curr = getTouchData(e.touches);
+  const prev = lastTouches;
+
+  const prevDist = Math.hypot(prev[1].x - prev[0].x, prev[1].y - prev[0].y);
+  const currDist = Math.hypot(curr[1].x - curr[0].x, curr[1].y - curr[0].y);
+
+  const prevMidX = (prev[0].x + prev[1].x) / 2;
+  const prevMidY = (prev[0].y + prev[1].y) / 2;
+  const currMidX = (curr[0].x + curr[1].x) / 2;
+  const currMidY = (curr[0].y + curr[1].y) / 2;
+
+  // Scale change
+  const ds = prevDist > 0 ? currDist / prevDist : 1;
+  const newScale = Math.max(0.5, Math.min(5, viewScale * ds));
+
+  // Zoom around the midpoint + pan with midpoint movement
+  viewPanX = currMidX - (prevMidX - viewPanX) * (newScale / viewScale);
+  viewPanY = currMidY - (prevMidY - viewPanY) * (newScale / viewScale);
+  viewScale = newScale;
+
+  engine.setViewTransform(viewScale, viewPanX, viewPanY);
+  lastTouches = curr;
+}, { passive: false });
+
+container.addEventListener('touchend', (e) => {
+  if (gestureActive && e.touches.length < 2) {
+    gestureActive = false;
+    lastTouches = null;
+    // Brief delay before re-enabling drawing to prevent accidental stroke
+    setTimeout(() => { engine.paused = false; }, 80);
+  }
+});
+
+// Double-tap to reset zoom
+let lastTap = 0;
+container.addEventListener('touchend', (e) => {
+  if (e.touches.length !== 0) return;
+  const now = Date.now();
+  if (now - lastTap < 300 && viewScale !== 1) {
+    viewScale = 1;
+    viewPanX = 0;
+    viewPanY = 0;
+    engine.resetView();
+  }
+  lastTap = now;
+});
+
+/* ── Prevent iOS bounce (single-finger on canvas handled by engine, block the rest) ── */
+document.addEventListener('touchmove', (e) => {
+  if (e.target === canvas || container.contains(e.target)) {
+    if (!gestureActive) e.preventDefault();
+  }
+}, { passive: false });
+
+/* ── PeerJS connection ── */
+function setConnectionStatus(state, text) {
   statusDot.className = 'status-dot ' + state;
   statusText.textContent = text;
 }
@@ -85,37 +231,36 @@ function setStatus(state, text) {
 async function connectToPeer() {
   if (!hostPeerId) return;
 
-  setStatus('connecting', 'Connecting...');
+  setConnectionStatus('connecting', 'Connecting...');
 
   peer = new PeerRemote(hostPeerId, {
     onStateChange: (state) => {
       switch (state) {
         case 'connecting':
-          setStatus('connecting', 'Connecting...');
+          setConnectionStatus('connecting', 'Connecting...');
           break;
         case 'connected':
-          setStatus('connected', 'Connected — draw and tap Send');
+          setConnectionStatus('connected', 'Connected');
           sendBtn.disabled = false;
           break;
         case 'sending':
-          setStatus('connected', 'Sending...');
+          setConnectionStatus('connected', 'Sending...');
           break;
         case 'disconnected':
-          setStatus('', 'Disconnected');
+          setConnectionStatus('', 'Disconnected');
           sendBtn.disabled = true;
           break;
         case 'error':
-          setStatus('error', 'Connection lost');
+          setConnectionStatus('error', 'Connection lost');
           sendBtn.disabled = true;
           break;
       }
     },
     onAck: () => {
-      setStatus('connected', 'Sent! Draw another or close this page.');
       sendBtn.disabled = false;
     },
     onPasteAck: () => {
-      setStatus('connected', 'Pasted into chat!');
+      showToast('Pasted into chat!', 'success');
       sendBtn.disabled = false;
     },
     onError: (err) => {
@@ -126,7 +271,7 @@ async function connectToPeer() {
   try {
     await peer.connect();
   } catch (e) {
-    setStatus('error', 'Failed to connect');
+    setConnectionStatus('error', 'Failed to connect');
     errorTitle.textContent = 'Connection Failed';
     errorMsg.textContent = 'Could not connect to the extension. Make sure the sharing session is still active and try scanning the QR code again.';
     errorOverlay.classList.remove('hidden');
@@ -137,12 +282,12 @@ async function connectToPeer() {
 sendBtn.onclick = async () => {
   if (!peer || peer.getState() !== 'connected') return;
   sendBtn.disabled = true;
-  setStatus('connected', 'Pasting to chat...');
 
   try {
     peer.requestPaste();
+    showToast('Pasting...', '');
   } catch (e) {
-    setStatus('error', 'Failed: ' + e.message);
+    showToast('Failed: ' + e.message, 'error');
     sendBtn.disabled = false;
   }
 };
