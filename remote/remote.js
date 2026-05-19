@@ -36,6 +36,7 @@ let peer = null;
 
 /* ── Drawing engine ── */
 const engine = new DrawingEngine(canvas, container, {
+  gridOverlay,
   onHistoryChange: updateUndoRedo,
   onDrawEvent: (event) => {
     if (peer && peer.getState() === 'connected') {

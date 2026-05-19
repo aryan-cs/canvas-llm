@@ -12,6 +12,7 @@ const gridOverlay = document.getElementById('grid-overlay');
 let peerHost = null; // declared early for engine callback closure
 
 const engine = new DrawingEngine(canvas, container, {
+  gridOverlay,
   onHistoryChange: updateUndoRedo,
   onDrawEvent: (event) => {
     if (peerHost && peerHost.getState() === 'connected') {

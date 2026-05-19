@@ -2730,6 +2730,7 @@
       this.color = "#000000";
       this.brushSize = 3;
       this.background = opts.background || "#ffffff";
+      this.gridOverlay = opts.gridOverlay || null;
       this.onHistoryChange = opts.onHistoryChange || (() => {
       });
       this.onDrawEvent = opts.onDrawEvent || null;
@@ -2861,8 +2862,13 @@
       this._viewScale = scale;
       this._viewPanX = panX;
       this._viewPanY = panY;
+      const t = `translate(${panX}px, ${panY}px) scale(${scale})`;
       this.canvas.style.transformOrigin = "0 0";
-      this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      this.canvas.style.transform = t;
+      if (this.gridOverlay) {
+        this.gridOverlay.style.transformOrigin = "0 0";
+        this.gridOverlay.style.transform = t;
+      }
     }
     resetView() {
       this.setViewTransform(1, 0, 0);
@@ -7256,6 +7262,7 @@
   var gridOverlay = document.getElementById("grid-overlay");
   var peerHost = null;
   var engine = new DrawingEngine(canvas, container, {
+    gridOverlay,
     onHistoryChange: updateUndoRedo,
     onDrawEvent: (event) => {
       if (peerHost && peerHost.getState() === "connected") {
