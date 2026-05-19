@@ -806,34 +806,27 @@
       this._viewScale = scale;
       this._viewPanX = panX;
       this._viewPanY = panY;
-      this._expandCanvasForView();
       this.canvas.style.transformOrigin = "0 0";
       this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
       this._updateGridTransform();
     }
-    /* Grow the canvas backing store so the full visible area is drawable.
-       Adds a 100% buffer so we don't re-expand on every wheel tick. */
-    _expandCanvasForView() {
-      const r = this.container.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return;
+    /* Grow the canvas backing store so a point (in canvas-local coords) is drawable.
+       Called lazily from _onDown / remoteStroke — never during zoom/pan.
+       Adds generous buffer so subsequent strokes rarely re-trigger. */
+    _expandCanvasForPoint(px, py) {
       const dpr = devicePixelRatio || 1;
-      const visLeft = -this._viewPanX / this._viewScale;
-      const visTop = -this._viewPanY / this._viewScale;
-      const visRight = visLeft + r.width / this._viewScale;
-      const visBottom = visTop + r.height / this._viewScale;
       const curW = this.canvas.width / dpr;
       const curH = this.canvas.height / dpr;
-      const expandLeft = Math.max(0, -visLeft);
-      const expandTop = Math.max(0, -visTop);
-      const expandRight = Math.max(0, visRight - curW);
-      const expandBottom = Math.max(0, visBottom - curH);
+      const expandLeft = Math.max(0, -px);
+      const expandTop = Math.max(0, -py);
+      const expandRight = Math.max(0, px - curW + 1);
+      const expandBottom = Math.max(0, py - curH + 1);
       if (expandLeft < 1 && expandTop < 1 && expandRight < 1 && expandBottom < 1) return;
-      const bufW = r.width / this._viewScale;
-      const bufH = r.height / this._viewScale;
-      const totalLeft = Math.ceil(expandLeft + (expandLeft > 0 ? bufW : 0));
-      const totalTop = Math.ceil(expandTop + (expandTop > 0 ? bufH : 0));
-      const totalRight = Math.ceil(expandRight + (expandRight > 0 ? bufW : 0));
-      const totalBottom = Math.ceil(expandBottom + (expandBottom > 0 ? bufH : 0));
+      const buf = 500;
+      const totalLeft = Math.ceil(expandLeft + (expandLeft > 0 ? buf : 0));
+      const totalTop = Math.ceil(expandTop + (expandTop > 0 ? buf : 0));
+      const totalRight = Math.ceil(expandRight + (expandRight > 0 ? buf : 0));
+      const totalBottom = Math.ceil(expandBottom + (expandBottom > 0 ? buf : 0));
       const newW = Math.ceil(curW + totalLeft + totalRight);
       const newH = Math.ceil(curH + totalTop + totalBottom);
       const offX = totalLeft;
@@ -859,6 +852,7 @@
       if (offX > 0 || offY > 0) {
         this._viewPanX += offX * this._viewScale;
         this._viewPanY += offY * this._viewScale;
+        this.canvas.style.transform = `translate(${this._viewPanX}px, ${this._viewPanY}px) scale(${this._viewScale})`;
       }
     }
     resetView() {
@@ -952,8 +946,11 @@
       const { ctx } = this;
       switch (event.type) {
         case "stroke-start": {
-          const x = event.nx * r.width;
-          const y = event.ny * r.width;
+          let x = event.nx * r.width;
+          let y = event.ny * r.width;
+          this._expandCanvasForPoint(x, y);
+          x = event.nx * r.width;
+          y = event.ny * r.width;
           const prevOp = ctx.globalCompositeOperation;
           const prevStroke = ctx.strokeStyle;
           const prevWidth = ctx.lineWidth;
@@ -1028,7 +1025,9 @@
       if (this.paused || e.button !== 0) return;
       if (this._isDrawing) return;
       e.preventDefault();
-      const p = this._pt(e);
+      let p = this._pt(e);
+      this._expandCanvasForPoint(p.x, p.y);
+      p = this._pt(e);
       this._isDrawing = true;
       this._lastPt = p;
       this._activePointerId = e.pointerId;
