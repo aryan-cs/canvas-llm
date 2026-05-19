@@ -37,9 +37,11 @@ export class DrawingEngine {
     this._onMove = this._onMove.bind(this);
     this._onUp = this._onUp.bind(this);
 
-    canvas.addEventListener('pointerdown', this._onDown);
-    canvas.addEventListener('pointermove', this._onMove);
-    canvas.addEventListener('pointerup', this._onUp);
+    // Listen on container (not canvas) so drawing works in the visible area
+    // outside the canvas element when zoomed out.
+    container.addEventListener('pointerdown', this._onDown);
+    container.addEventListener('pointermove', this._onMove);
+    container.addEventListener('pointerup', this._onUp);
   }
 
   /* ── Tool state ── */
@@ -263,7 +265,7 @@ export class DrawingEngine {
     this.ctx.globalCompositeOperation = 'source-over';
     // Release pointer capture so touch events work for gestures
     if (this._activePointerId != null) {
-      try { this.canvas.releasePointerCapture(this._activePointerId); } catch {}
+      try { this.container.releasePointerCapture(this._activePointerId); } catch {}
       this._activePointerId = null;
     }
     if (this._undoIdx >= 0) this._restoreUndo();
@@ -441,7 +443,7 @@ export class DrawingEngine {
     this._isDrawing = true;
     this._lastPt = p;
     this._activePointerId = e.pointerId;
-    this.canvas.setPointerCapture(e.pointerId);
+    this.container.setPointerCapture(e.pointerId);
 
     const { ctx } = this;
     ctx.globalCompositeOperation = this.tool === 'erase' ? 'destination-out' : 'source-over';
@@ -509,7 +511,7 @@ export class DrawingEngine {
     this._isDrawing = false;
     this._lastPt = null;
     this._activePointerId = null;
-    this.canvas.releasePointerCapture(e.pointerId);
+    this.container.releasePointerCapture(e.pointerId);
     this.ctx.globalCompositeOperation = 'source-over';
     this.pushUndo();
 
@@ -526,8 +528,8 @@ export class DrawingEngine {
 
   /* ── Cleanup ── */
   destroy() {
-    this.canvas.removeEventListener('pointerdown', this._onDown);
-    this.canvas.removeEventListener('pointermove', this._onMove);
-    this.canvas.removeEventListener('pointerup', this._onUp);
+    this.container.removeEventListener('pointerdown', this._onDown);
+    this.container.removeEventListener('pointermove', this._onMove);
+    this.container.removeEventListener('pointerup', this._onUp);
   }
 }
