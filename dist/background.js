@@ -52,7 +52,20 @@
       if (pasteResult.error) return pasteResult;
       if (!submit) return pasteResult;
       const getSendBtn = sendBtnFinder(host);
-      const btn = await waitForEnabled(getSendBtn, 2e4);
+      const btn = await waitForEnabled(getSendBtn, 3e4);
+      if (host === "gemini.google.com") {
+        await new Promise((r) => setTimeout(r, 2500));
+        const start = Date.now();
+        while (Date.now() - start < 15e3) {
+          if (!isUploadInProgress()) break;
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        const btn2 = getSendBtn();
+        if (btn2 && isEnabled(btn2)) {
+          btn2.click();
+          return { success: true };
+        }
+      }
       btn.click();
       return { success: true };
     } catch (e) {
@@ -110,20 +123,37 @@
         }, 400);
       });
     }
+    function clearGeminiAttachments() {
+      const buttons = document.querySelectorAll(
+        'button[aria-label*="Remove" i], button[aria-label*="Delete" i], [role="button"][aria-label*="Remove" i], [role="button"][aria-label*="Delete" i]'
+      );
+      const seen = /* @__PURE__ */ new Set();
+      buttons.forEach((btn) => {
+        if (seen.has(btn)) return;
+        const label = (btn.getAttribute("aria-label") || "").toLowerCase();
+        if (label.includes("attachment") || label.includes("file") || label.includes("image") || label.includes("upload") || label.includes("preview") || // Bare "Remove" / "Delete" buttons inside likely attachment containers
+        (label === "remove" || label === "delete") && btn.closest('[class*="attachment" i], [class*="upload" i], [class*="file" i], [class*="chip" i]')) {
+          seen.add(btn);
+          try {
+            btn.click();
+          } catch {
+          }
+        }
+      });
+    }
     function geminiPaste(file) {
-      const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-      const imageInput = fileInputs.find((i) => {
-        const accept = (i.accept || "").toLowerCase();
-        return accept.includes("image") || accept.includes("*") || !accept;
-      }) || fileInputs[0];
-      if (imageInput) {
+      clearGeminiAttachments();
+      const editor = document.querySelector('.ql-editor[contenteditable="true"]') || document.querySelector('div[contenteditable="true"][role="textbox"]') || document.querySelector('[contenteditable="true"]');
+      if (editor) {
+        editor.focus();
         const dt = new DataTransfer();
         dt.items.add(file);
-        imageInput.files = dt.files;
-        imageInput.dispatchEvent(new Event("change", { bubbles: true }));
+        editor.dispatchEvent(
+          new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
+        );
         return { success: true };
       }
-      const dropzone = document.querySelector(".xap-uploader-dropzone") || document.querySelector('[class*="dropzone" i]') || document.querySelector('.ql-editor[contenteditable="true"]');
+      const dropzone = document.querySelector(".xap-uploader-dropzone") || document.querySelector('[class*="dropzone" i]');
       if (dropzone) {
         const dt = new DataTransfer();
         dt.items.add(file);
@@ -133,14 +163,12 @@
         dropzone.dispatchEvent(new DragEvent("drop", dragOpts));
         return { success: true };
       }
-      const editor = document.querySelector('.ql-editor[contenteditable="true"]') || document.querySelector('div[contenteditable="true"][role="textbox"]') || document.querySelector('[contenteditable="true"]');
-      if (editor) {
-        editor.focus();
+      const fileInput = document.querySelector('input[type="file"]');
+      if (fileInput) {
         const dt = new DataTransfer();
         dt.items.add(file);
-        editor.dispatchEvent(
-          new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
-        );
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
         return { success: true };
       }
       return { error: "Could not find Gemini chat input" };

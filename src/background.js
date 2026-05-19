@@ -68,9 +68,24 @@ async function pasteImageInPage(imageDataUrl, submit) {
     if (!submit) return pasteResult;
 
     // Submit: wait for the send button to become enabled (image upload complete),
-    // then click it.
+    // then click it. Gemini gets extra hand-holding because its send button
+    // can enable BEFORE the upload finishes.
     const getSendBtn = sendBtnFinder(host);
-    const btn = await waitForEnabled(getSendBtn, 20000);
+    const btn = await waitForEnabled(getSendBtn, 30000);
+    if (host === 'gemini.google.com') {
+      // Extra settle time — Gemini enables the send button as soon as a
+      // thumbnail appears, well before the file is actually uploaded.
+      await new Promise(r => setTimeout(r, 2500));
+      // Re-fetch and re-check after the wait — make sure no upload spinner
+      // is still up.
+      const start = Date.now();
+      while (Date.now() - start < 15000) {
+        if (!isUploadInProgress()) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      const btn2 = getSendBtn();
+      if (btn2 && isEnabled(btn2)) { btn2.click(); return { success: true }; }
+    }
     btn.click();
     return { success: true };
   } catch (e) {
@@ -139,38 +154,41 @@ async function pasteImageInPage(imageDataUrl, submit) {
     });
   }
 
+  function clearGeminiAttachments() {
+    // Click "remove" / "delete" buttons on existing attachment chips so we
+    // don't stack up old uploads from previous attempts. Scoped to buttons
+    // whose label specifically mentions an attachment / file / image so we
+    // don't accidentally click "Remove" buttons elsewhere on the page.
+    const buttons = document.querySelectorAll(
+      'button[aria-label*="Remove" i], button[aria-label*="Delete" i], ' +
+      '[role="button"][aria-label*="Remove" i], [role="button"][aria-label*="Delete" i]'
+    );
+    const seen = new Set();
+    buttons.forEach((btn) => {
+      if (seen.has(btn)) return;
+      const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+      if (
+        label.includes('attachment') ||
+        label.includes('file') ||
+        label.includes('image') ||
+        label.includes('upload') ||
+        label.includes('preview') ||
+        // Bare "Remove" / "Delete" buttons inside likely attachment containers
+        (label === 'remove' || label === 'delete') &&
+        btn.closest('[class*="attachment" i], [class*="upload" i], [class*="file" i], [class*="chip" i]')
+      ) {
+        seen.add(btn);
+        try { btn.click(); } catch {}
+      }
+    });
+  }
+
   function geminiPaste(file) {
-    // Strategy 1: file input (most reliable — triggers Gemini's real upload flow)
-    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-    // Prefer inputs that accept images
-    const imageInput = fileInputs.find(i => {
-      const accept = (i.accept || '').toLowerCase();
-      return accept.includes('image') || accept.includes('*') || !accept;
-    }) || fileInputs[0];
-    if (imageInput) {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      imageInput.files = dt.files;
-      imageInput.dispatchEvent(new Event('change', { bubbles: true }));
-      return { success: true };
-    }
+    // Clear any existing attachments from prior attempts first
+    clearGeminiAttachments();
 
-    // Strategy 2: synthetic drag/drop on a dropzone
-    const dropzone =
-      document.querySelector('.xap-uploader-dropzone') ||
-      document.querySelector('[class*="dropzone" i]') ||
-      document.querySelector('.ql-editor[contenteditable="true"]');
-    if (dropzone) {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      const dragOpts = { bubbles: true, cancelable: true, dataTransfer: dt };
-      dropzone.dispatchEvent(new DragEvent('dragenter', dragOpts));
-      dropzone.dispatchEvent(new DragEvent('dragover', dragOpts));
-      dropzone.dispatchEvent(new DragEvent('drop', dragOpts));
-      return { success: true };
-    }
-
-    // Strategy 3: clipboard paste on editor (last resort)
+    // Strategy 1: clipboard paste on the Quill editor — Gemini's native
+    // image-paste path, the most reliable for actually triggering upload.
     const editor =
       document.querySelector('.ql-editor[contenteditable="true"]') ||
       document.querySelector('div[contenteditable="true"][role="textbox"]') ||
@@ -182,6 +200,30 @@ async function pasteImageInPage(imageDataUrl, submit) {
       editor.dispatchEvent(
         new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })
       );
+      return { success: true };
+    }
+
+    // Strategy 2: synthetic drag/drop on a dropzone
+    const dropzone =
+      document.querySelector('.xap-uploader-dropzone') ||
+      document.querySelector('[class*="dropzone" i]');
+    if (dropzone) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const dragOpts = { bubbles: true, cancelable: true, dataTransfer: dt };
+      dropzone.dispatchEvent(new DragEvent('dragenter', dragOpts));
+      dropzone.dispatchEvent(new DragEvent('dragover', dragOpts));
+      dropzone.dispatchEvent(new DragEvent('drop', dragOpts));
+      return { success: true };
+    }
+
+    // Strategy 3: file input
+    const fileInput = document.querySelector('input[type="file"]');
+    if (fileInput) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
       return { success: true };
     }
     return { error: 'Could not find Gemini chat input' };
