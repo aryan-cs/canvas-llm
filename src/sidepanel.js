@@ -333,9 +333,11 @@ async function startSharing() {
       _suppressSettingsSync = false;
     },
     onRemoteConnected: () => {
-      // Send current canvas state + settings (NOT view — each device manages its own)
+      // Send current canvas state + settings (NOT view — each device manages its own).
+      // Use CSS-resolution export so the remote interprets coords at the same CSS
+      // scale regardless of dpr mismatch (iPhone dpr=3 vs Mac dpr=2 etc.)
       const settings = { bg: engine.background, grid: gridOn, gridSize };
-      peerHost.sendInit(engine.toDataURL(), settings);
+      peerHost.sendInit(engine.toCssDataURL(), settings);
     },
     onPasteRequest: async () => {
       try {

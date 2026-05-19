@@ -2972,13 +2972,10 @@
         img.onload = () => {
           const { ctx, canvas: canvas2 } = this;
           const dpr = devicePixelRatio || 1;
-          const imgCssW = img.width / dpr;
-          const imgCssH = img.height / dpr;
-          this._expandCanvasForPoint(imgCssW, imgCssH);
+          this._expandCanvasForPoint(img.width, img.height);
           ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.fillStyle = this.background;
-          ctx.fillRect(0, 0, canvas2.width, canvas2.height);
+          ctx.fillRect(0, 0, canvas2.width / dpr, canvas2.height / dpr);
           ctx.drawImage(img, 0, 0);
           ctx.restore();
           this.pushUndo();
@@ -3000,6 +2997,17 @@
         return new Promise((resolve) => this.canvas.toBlob(resolve, "image/png"));
       }
       return new Promise((resolve) => this._exportView().toBlob(resolve, "image/png"));
+    }
+    /* Export at CSS resolution (dpr=1) — for peer sync so receiving devices
+       with different dpr interpret coordinates consistently. */
+    toCssDataURL() {
+      const dpr = devicePixelRatio || 1;
+      const tmp = document.createElement("canvas");
+      tmp.width = Math.max(1, Math.round(this.canvas.width / dpr));
+      tmp.height = Math.max(1, Math.round(this.canvas.height / dpr));
+      const tctx = tmp.getContext("2d");
+      tctx.drawImage(this.canvas, 0, 0, tmp.width, tmp.height);
+      return tmp.toDataURL("image/png");
     }
     _exportView() {
       const dpr = devicePixelRatio || 1;
@@ -7696,7 +7704,7 @@
       },
       onRemoteConnected: () => {
         const settings = { bg: engine.background, grid: gridOn, gridSize };
-        peerHost.sendInit(engine.toDataURL(), settings);
+        peerHost.sendInit(engine.toCssDataURL(), settings);
       },
       onPasteRequest: async () => {
         try {

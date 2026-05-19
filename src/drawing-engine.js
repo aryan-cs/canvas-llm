@@ -287,16 +287,13 @@ export class DrawingEngine {
       img.onload = () => {
         const { ctx, canvas } = this;
         const dpr = devicePixelRatio || 1;
-        // Expand canvas to fit the incoming image — strokes use absolute coords,
-        // so we need enough backing store to cover the sender's drawable area.
-        const imgCssW = img.width / dpr;
-        const imgCssH = img.height / dpr;
-        this._expandCanvasForPoint(imgCssW, imgCssH);
+        // Image dimensions are in CSS pixels (sender uses toCssDataURL).
+        // Expand canvas to fit it.
+        this._expandCanvasForPoint(img.width, img.height);
         ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        // Draw at 1:1 pixel scale — both canvases share the same coordinate space
+        // ctx already has dpr transform active — drawImage uses CSS coords.
         ctx.fillStyle = this.background;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
         ctx.drawImage(img, 0, 0);
         ctx.restore();
         this.pushUndo();
@@ -320,6 +317,18 @@ export class DrawingEngine {
       return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png'));
     }
     return new Promise(resolve => this._exportView().toBlob(resolve, 'image/png'));
+  }
+
+  /* Export at CSS resolution (dpr=1) — for peer sync so receiving devices
+     with different dpr interpret coordinates consistently. */
+  toCssDataURL() {
+    const dpr = devicePixelRatio || 1;
+    const tmp = document.createElement('canvas');
+    tmp.width = Math.max(1, Math.round(this.canvas.width / dpr));
+    tmp.height = Math.max(1, Math.round(this.canvas.height / dpr));
+    const tctx = tmp.getContext('2d');
+    tctx.drawImage(this.canvas, 0, 0, tmp.width, tmp.height);
+    return tmp.toDataURL('image/png');
   }
 
   _exportView() {
