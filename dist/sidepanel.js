@@ -7324,6 +7324,35 @@
     undoBtn.disabled = !engine.canUndo();
     redoBtn.disabled = !engine.canRedo();
   }
+  var viewScale = 1;
+  var viewPanX = 0;
+  var viewPanY = 0;
+  container.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const r = container.getBoundingClientRect();
+      const mx = e.clientX - r.left;
+      const my = e.clientY - r.top;
+      const zoomFactor = Math.exp(-e.deltaY * 0.01);
+      const newScale = Math.max(0.5, Math.min(5, viewScale * zoomFactor));
+      viewPanX = mx - (mx - viewPanX) * (newScale / viewScale);
+      viewPanY = my - (my - viewPanY) * (newScale / viewScale);
+      viewScale = newScale;
+    } else {
+      viewPanX -= e.deltaX;
+      viewPanY -= e.deltaY;
+    }
+    engine.setViewTransform(viewScale, viewPanX, viewPanY);
+  }, { passive: false });
+  container.addEventListener("dblclick", (e) => {
+    if (viewScale !== 1) {
+      e.preventDefault();
+      viewScale = 1;
+      viewPanX = 0;
+      viewPanY = 0;
+      engine.resetView();
+    }
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
       e.preventDefault();

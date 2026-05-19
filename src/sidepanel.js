@@ -80,6 +80,47 @@ function updateUndoRedo() {
   redoBtn.disabled = !engine.canRedo();
 }
 
+/* ── Trackpad zoom / pan ── */
+let viewScale = 1;
+let viewPanX = 0;
+let viewPanY = 0;
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+
+  if (e.ctrlKey || e.metaKey) {
+    // Pinch-to-zoom on trackpad (browsers send ctrlKey + wheel for pinch)
+    const r = container.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+
+    const zoomFactor = Math.exp(-e.deltaY * 0.01);
+    const newScale = Math.max(0.5, Math.min(5, viewScale * zoomFactor));
+
+    // Zoom around cursor position
+    viewPanX = mx - (mx - viewPanX) * (newScale / viewScale);
+    viewPanY = my - (my - viewPanY) * (newScale / viewScale);
+    viewScale = newScale;
+  } else {
+    // Two-finger scroll = pan
+    viewPanX -= e.deltaX;
+    viewPanY -= e.deltaY;
+  }
+
+  engine.setViewTransform(viewScale, viewPanX, viewPanY);
+}, { passive: false });
+
+// Double-click to reset zoom
+container.addEventListener('dblclick', (e) => {
+  if (viewScale !== 1) {
+    e.preventDefault();
+    viewScale = 1;
+    viewPanX = 0;
+    viewPanY = 0;
+    engine.resetView();
+  }
+});
+
 /* ── Keyboard shortcuts ── */
 document.addEventListener('keydown', e => {
   if (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); engine.redo(); sendActionToRemote('redo'); }
