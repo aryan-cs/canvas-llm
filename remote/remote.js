@@ -224,21 +224,6 @@ container.addEventListener('touchend', (e) => {
   }
 });
 
-// Double-tap to reset zoom
-let lastTap = 0;
-container.addEventListener('touchend', (e) => {
-  if (e.touches.length !== 0) return;
-  const now = Date.now();
-  if (now - lastTap < 300 && viewScale !== 1) {
-    viewScale = 1;
-    viewPanX = 0;
-    viewPanY = 0;
-    engine.resetView();
-    sendViewToHost();
-  }
-  lastTap = now;
-});
-
 /* ── Prevent iOS bounce (single-finger on canvas handled by engine, block the rest) ── */
 document.addEventListener('touchmove', (e) => {
   if (e.target === canvas || container.contains(e.target)) {

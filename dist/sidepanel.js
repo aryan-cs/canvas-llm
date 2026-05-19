@@ -7425,16 +7425,6 @@
     viewPanY = engine._viewPanY;
     sendViewToRemote();
   }, { passive: false });
-  container.addEventListener("dblclick", (e) => {
-    if (viewScale !== 1) {
-      e.preventDefault();
-      viewScale = 1;
-      viewPanX = 0;
-      viewPanY = 0;
-      engine.resetView();
-      sendViewToRemote();
-    }
-  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
       e.preventDefault();
@@ -7444,10 +7434,6 @@
       e.preventDefault();
       engine.undo();
       sendActionToRemote("undo");
-    } else if (e.key === "d" && !e.ctrlKey && !e.metaKey) {
-      drawBtn.click();
-    } else if (e.key === "e" && !e.ctrlKey && !e.metaKey) {
-      eraseBtn.click();
     }
   });
   var pasteBtn = document.getElementById("paste-btn");
