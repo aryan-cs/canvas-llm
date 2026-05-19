@@ -157,10 +157,7 @@ let viewPanY = 0;
 let _suppressViewSync = false;
 
 function sendViewToHost() {
-  if (_suppressViewSync) return;
-  if (peer && peer.getState() === 'connected') {
-    peer.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
-  }
+  // No-op: each device manages its own view independently.
 }
 
 function getTouchData(touches) {
@@ -318,16 +315,8 @@ async function connectToPeer() {
     onSettings: (settings) => {
       applySettings(settings);
     },
-    onView: (view) => {
-      _suppressViewSync = true;
-      viewScale = view.scale;
-      viewPanX = view.panX;
-      viewPanY = view.panY;
-      engine.setViewTransform(viewScale, viewPanX, viewPanY);
-      viewScale = engine._viewScale;
-      viewPanX = engine._viewPanX;
-      viewPanY = engine._viewPanY;
-      _suppressViewSync = false;
+    onView: () => {
+      // Ignored: views are independent per device.
     },
     onInit: (canvasData, settings) => {
       if (settings) applySettings(settings);

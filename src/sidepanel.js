@@ -88,10 +88,9 @@ let viewPanY = 0;
 let _suppressViewSync = false;
 
 function sendViewToRemote() {
-  if (_suppressViewSync) return;
-  if (peerHost && peerHost.getState() === 'connected') {
-    peerHost.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
-  }
+  // No-op: each device manages its own view (zoom/pan) independently.
+  // Stroke coordinates are absolute canvas-local positions, so strokes
+  // appear at the same canvas position on both devices regardless of view.
 }
 
 container.addEventListener('wheel', (e) => {
@@ -312,16 +311,8 @@ async function startSharing() {
       else if (action === 'redo') engine.redo();
       else if (action === 'clear') engine.clear();
     },
-    onView: (view) => {
-      _suppressViewSync = true;
-      viewScale = view.scale;
-      viewPanX = view.panX;
-      viewPanY = view.panY;
-      engine.setViewTransform(viewScale, viewPanX, viewPanY);
-      viewScale = engine._viewScale;
-      viewPanX = engine._viewPanX;
-      viewPanY = engine._viewPanY;
-      _suppressViewSync = false;
+    onView: () => {
+      // Ignored: views are independent per device.
     },
     onSettings: (settings) => {
       _suppressSettingsSync = true;
@@ -342,11 +333,9 @@ async function startSharing() {
       _suppressSettingsSync = false;
     },
     onRemoteConnected: () => {
-      // Send current canvas state + settings + view to newly connected remote
+      // Send current canvas state + settings (NOT view — each device manages its own)
       const settings = { bg: engine.background, grid: gridOn, gridSize };
       peerHost.sendInit(engine.toDataURL(), settings);
-      // Also sync current view
-      peerHost.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
     },
     onPasteRequest: async () => {
       try {

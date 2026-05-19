@@ -2928,8 +2928,8 @@
       this._undoIdx = -1;
       this.pushUndo();
       if (offX > 0 || offY > 0) {
-        this._viewPanX += offX * this._viewScale;
-        this._viewPanY += offY * this._viewScale;
+        this._viewPanX -= offX * this._viewScale;
+        this._viewPanY -= offY * this._viewScale;
         this.canvas.style.transform = `translate(${this._viewPanX}px, ${this._viewPanY}px) scale(${this._viewScale})`;
       }
     }
@@ -2971,6 +2971,10 @@
         const img = new Image();
         img.onload = () => {
           const { ctx, canvas: canvas2 } = this;
+          const dpr = devicePixelRatio || 1;
+          const imgCssW = img.width / dpr;
+          const imgCssH = img.height / dpr;
+          this._expandCanvasForPoint(imgCssW, imgCssH);
           ctx.save();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.fillStyle = this.background;
@@ -7463,12 +7467,7 @@
   var viewScale = 1;
   var viewPanX = 0;
   var viewPanY = 0;
-  var _suppressViewSync = false;
   function sendViewToRemote() {
-    if (_suppressViewSync) return;
-    if (peerHost && peerHost.getState() === "connected") {
-      peerHost.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
-    }
   }
   container.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -7675,16 +7674,7 @@
         else if (action === "redo") engine.redo();
         else if (action === "clear") engine.clear();
       },
-      onView: (view) => {
-        _suppressViewSync = true;
-        viewScale = view.scale;
-        viewPanX = view.panX;
-        viewPanY = view.panY;
-        engine.setViewTransform(viewScale, viewPanX, viewPanY);
-        viewScale = engine._viewScale;
-        viewPanX = engine._viewPanX;
-        viewPanY = engine._viewPanY;
-        _suppressViewSync = false;
+      onView: () => {
       },
       onSettings: (settings) => {
         _suppressSettingsSync = true;
@@ -7707,7 +7697,6 @@
       onRemoteConnected: () => {
         const settings = { bg: engine.background, grid: gridOn, gridSize };
         peerHost.sendInit(engine.toDataURL(), settings);
-        peerHost.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
       },
       onPasteRequest: async () => {
         try {

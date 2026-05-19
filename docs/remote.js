@@ -850,8 +850,8 @@
       this._undoIdx = -1;
       this.pushUndo();
       if (offX > 0 || offY > 0) {
-        this._viewPanX += offX * this._viewScale;
-        this._viewPanY += offY * this._viewScale;
+        this._viewPanX -= offX * this._viewScale;
+        this._viewPanY -= offY * this._viewScale;
         this.canvas.style.transform = `translate(${this._viewPanX}px, ${this._viewPanY}px) scale(${this._viewScale})`;
       }
     }
@@ -893,6 +893,10 @@
         const img = new Image();
         img.onload = () => {
           const { ctx, canvas: canvas2 } = this;
+          const dpr = devicePixelRatio || 1;
+          const imgCssW = img.width / dpr;
+          const imgCssH = img.height / dpr;
+          this._expandCanvasForPoint(imgCssW, imgCssH);
           ctx.save();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.fillStyle = this.background;
@@ -5412,12 +5416,7 @@
   var viewScale = 1;
   var viewPanX = 0;
   var viewPanY = 0;
-  var _suppressViewSync = false;
   function sendViewToHost() {
-    if (_suppressViewSync) return;
-    if (peer && peer.getState() === "connected") {
-      peer.sendView({ scale: viewScale, panX: viewPanX, panY: viewPanY });
-    }
   }
   function getTouchData(touches) {
     const r = container.getBoundingClientRect();
@@ -5552,16 +5551,7 @@
       onSettings: (settings) => {
         applySettings(settings);
       },
-      onView: (view) => {
-        _suppressViewSync = true;
-        viewScale = view.scale;
-        viewPanX = view.panX;
-        viewPanY = view.panY;
-        engine.setViewTransform(viewScale, viewPanX, viewPanY);
-        viewScale = engine._viewScale;
-        viewPanX = engine._viewPanX;
-        viewPanY = engine._viewPanY;
-        _suppressViewSync = false;
+      onView: () => {
       },
       onInit: (canvasData, settings) => {
         if (settings) applySettings(settings);

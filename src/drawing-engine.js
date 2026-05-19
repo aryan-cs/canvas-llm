@@ -231,11 +231,12 @@ export class DrawingEngine {
     this._undoIdx = -1;
     this.pushUndo();
 
-    // Shift the pan to compensate for the canvas origin moving
+    // Shift the pan to compensate for the canvas origin moving.
+    // Canvas grew leftward by offX, so old content moved from raw 0 to raw offX.
+    // To keep old content at the same screen position, pan must DECREASE.
     if (offX > 0 || offY > 0) {
-      this._viewPanX += offX * this._viewScale;
-      this._viewPanY += offY * this._viewScale;
-      // Update the CSS transform so coordinates stay correct
+      this._viewPanX -= offX * this._viewScale;
+      this._viewPanY -= offY * this._viewScale;
       this.canvas.style.transform = `translate(${this._viewPanX}px, ${this._viewPanY}px) scale(${this._viewScale})`;
     }
   }
@@ -285,6 +286,12 @@ export class DrawingEngine {
       const img = new Image();
       img.onload = () => {
         const { ctx, canvas } = this;
+        const dpr = devicePixelRatio || 1;
+        // Expand canvas to fit the incoming image — strokes use absolute coords,
+        // so we need enough backing store to cover the sender's drawable area.
+        const imgCssW = img.width / dpr;
+        const imgCssH = img.height / dpr;
+        this._expandCanvasForPoint(imgCssW, imgCssH);
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         // Draw at 1:1 pixel scale — both canvases share the same coordinate space
