@@ -54,10 +54,21 @@ export class PeerHost {
         conn.on('data', (msg) => {
           if (msg && msg.type === 'image' && msg.data) {
             this._setState('transferring');
-            this._blobToDataUrl(msg.data).then((dataUrl) => {
-              this.onImageReceived(dataUrl);
+            this._blobToDataUrl(msg.data).then(async (dataUrl) => {
+              let result;
+              try {
+                result = await this.onImageReceived(dataUrl);
+              } catch (e) {
+                result = { success: false, error: e?.message || 'paste failed' };
+              }
               this._setState('connected');
-              try { conn.send({ type: 'image-ack' }); } catch {}
+              try {
+                conn.send({
+                  type: 'image-ack',
+                  success: !!(result && result.success),
+                  error: result && result.error ? result.error : null,
+                });
+              } catch {}
             });
           } else if (msg && msg.type === 'draw' && msg.event) {
             this.onDrawEvent(msg.event);

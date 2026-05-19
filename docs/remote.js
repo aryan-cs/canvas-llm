@@ -5120,7 +5120,7 @@
           });
           this._conn.on("data", (msg) => {
             if (msg && msg.type === "image-ack") {
-              this.onAck();
+              this.onAck({ success: !!msg.success, error: msg.error || null });
             } else if (msg && msg.type === "paste-ack") {
               this.onPasteAck();
             } else if (msg && msg.type === "action" && msg.action) {
@@ -5455,8 +5455,13 @@
             break;
         }
       },
-      onAck: () => {
+      onAck: (result) => {
         sendBtn.disabled = false;
+        if (result && result.success) {
+          showToast("Sent!", "success");
+        } else if (result) {
+          showToast("Failed: " + (result.error || "paste error"), "error");
+        }
       },
       onPasteAck: () => {
         showToast("Pasted into chat!", "success");

@@ -7209,11 +7209,20 @@
           conn.on("data", (msg) => {
             if (msg && msg.type === "image" && msg.data) {
               this._setState("transferring");
-              this._blobToDataUrl(msg.data).then((dataUrl) => {
-                this.onImageReceived(dataUrl);
+              this._blobToDataUrl(msg.data).then(async (dataUrl) => {
+                let result;
+                try {
+                  result = await this.onImageReceived(dataUrl);
+                } catch (e) {
+                  result = { success: false, error: e?.message || "paste failed" };
+                }
                 this._setState("connected");
                 try {
-                  conn.send({ type: "image-ack" });
+                  conn.send({
+                    type: "image-ack",
+                    success: !!(result && result.success),
+                    error: result && result.error ? result.error : null
+                  });
                 } catch {
                 }
               });
@@ -7640,8 +7649,11 @@
         try {
           await pasteImage(dataUrl);
           setStatus("Remote drawing pasted!", "success");
+          return { success: true };
         } catch (e) {
-          setStatus(e.message || "Failed to paste remote drawing", "error");
+          const msg = e.message || "Failed to paste remote drawing";
+          setStatus(msg, "error");
+          return { success: false, error: msg };
         }
       },
       onError: (err) => {

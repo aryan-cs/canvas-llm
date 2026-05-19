@@ -346,8 +346,11 @@ async function startSharing() {
       try {
         await pasteImage(dataUrl);
         setStatus('Remote drawing pasted!', 'success');
+        return { success: true };
       } catch (e) {
-        setStatus(e.message || 'Failed to paste remote drawing', 'error');
+        const msg = e.message || 'Failed to paste remote drawing';
+        setStatus(msg, 'error');
+        return { success: false, error: msg };
       }
     },
     onError: (err) => {
