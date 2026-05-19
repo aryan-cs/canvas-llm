@@ -348,16 +348,18 @@ async function connectToPeer() {
   }
 }
 
-/* ── Send = paste to chat on the Mac ── */
+/* ── Send = capture remote's current viewport, ship blob to host for paste ── */
 sendBtn.onclick = async () => {
   if (!peer || peer.getState() !== 'connected') return;
   sendBtn.disabled = true;
-
+  showToast('Sending...', '');
   try {
-    peer.requestPaste();
-    showToast('Pasting...', '');
+    const blob = await engine.toBlob();
+    if (!blob) throw new Error('Failed to capture canvas');
+    await peer.sendImage(blob);
+    // onAck / onPasteAck callbacks re-enable the button.
   } catch (e) {
-    showToast('Failed: ' + e.message, 'error');
+    showToast('Failed: ' + (e.message || 'send error'), 'error');
     sendBtn.disabled = false;
   }
 };

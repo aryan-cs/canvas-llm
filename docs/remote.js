@@ -875,6 +875,7 @@
     _onDown(e) {
       if (this.paused || e.button !== 0) return;
       if (this._isDrawing) return;
+      if (e.target !== this.canvas && e.target !== this.container) return;
       e.preventDefault();
       const p = this._screenToWorld(e);
       this._isDrawing = true;
@@ -5514,11 +5515,13 @@
   sendBtn.onclick = async () => {
     if (!peer || peer.getState() !== "connected") return;
     sendBtn.disabled = true;
+    showToast("Sending...", "");
     try {
-      peer.requestPaste();
-      showToast("Pasting...", "");
+      const blob = await engine.toBlob();
+      if (!blob) throw new Error("Failed to capture canvas");
+      await peer.sendImage(blob);
     } catch (e) {
-      showToast("Failed: " + e.message, "error");
+      showToast("Failed: " + (e.message || "send error"), "error");
       sendBtn.disabled = false;
     }
   };

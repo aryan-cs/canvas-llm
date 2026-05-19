@@ -2953,6 +2953,7 @@
     _onDown(e) {
       if (this.paused || e.button !== 0) return;
       if (this._isDrawing) return;
+      if (e.target !== this.canvas && e.target !== this.container) return;
       e.preventDefault();
       const p = this._screenToWorld(e);
       this._isDrawing = true;
