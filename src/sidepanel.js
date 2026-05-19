@@ -96,7 +96,7 @@ container.addEventListener('wheel', (e) => {
     const my = e.clientY - r.top;
 
     const zoomFactor = Math.exp(-e.deltaY * 0.01);
-    const newScale = Math.max(0.5, Math.min(5, viewScale * zoomFactor));
+    const newScale = viewScale * zoomFactor;
 
     // Zoom around cursor position
     viewPanX = mx - (mx - viewPanX) * (newScale / viewScale);
@@ -109,6 +109,10 @@ container.addEventListener('wheel', (e) => {
   }
 
   engine.setViewTransform(viewScale, viewPanX, viewPanY);
+  // Read back clamped values
+  viewScale = engine._viewScale;
+  viewPanX = engine._viewPanX;
+  viewPanY = engine._viewPanY;
 }, { passive: false });
 
 // Double-click to reset zoom

@@ -2877,6 +2877,12 @@
     }
     /* ── View transform (zoom / pan) ── */
     setViewTransform(scale, panX, panY) {
+      scale = Math.max(1, Math.min(5, scale));
+      const r = this.container.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        panX = Math.max(r.width * (1 - scale), Math.min(0, panX));
+        panY = Math.max(r.height * (1 - scale), Math.min(0, panY));
+      }
       this._viewScale = scale;
       this._viewPanX = panX;
       this._viewPanY = panY;
@@ -2909,6 +2915,9 @@
         this._activePointerId = null;
       }
       if (this._undoIdx >= 0) this._restoreUndo();
+      if (this.onDrawEvent) {
+        this.onDrawEvent({ type: "stroke-cancel" });
+      }
     }
     /* ── Load an image onto the canvas ── */
     loadImage(dataUrl) {
@@ -3015,6 +3024,10 @@
         case "stroke-end":
           this._remoteLast = null;
           this.pushUndo();
+          break;
+        case "stroke-cancel":
+          this._remoteLast = null;
+          if (this._undoIdx >= 0) this._restoreUndo();
           break;
         case "clear":
           this.clear();
@@ -7385,7 +7398,7 @@
       const mx = e.clientX - r.left;
       const my = e.clientY - r.top;
       const zoomFactor = Math.exp(-e.deltaY * 0.01);
-      const newScale = Math.max(0.5, Math.min(5, viewScale * zoomFactor));
+      const newScale = viewScale * zoomFactor;
       viewPanX = mx - (mx - viewPanX) * (newScale / viewScale);
       viewPanY = my - (my - viewPanY) * (newScale / viewScale);
       viewScale = newScale;
@@ -7394,6 +7407,9 @@
       viewPanY -= e.deltaY;
     }
     engine.setViewTransform(viewScale, viewPanX, viewPanY);
+    viewScale = engine._viewScale;
+    viewPanX = engine._viewPanX;
+    viewPanY = engine._viewPanY;
   }, { passive: false });
   container.addEventListener("dblclick", (e) => {
     if (viewScale !== 1) {

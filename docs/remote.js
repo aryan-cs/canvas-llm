@@ -799,6 +799,12 @@
     }
     /* ── View transform (zoom / pan) ── */
     setViewTransform(scale, panX, panY) {
+      scale = Math.max(1, Math.min(5, scale));
+      const r = this.container.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        panX = Math.max(r.width * (1 - scale), Math.min(0, panX));
+        panY = Math.max(r.height * (1 - scale), Math.min(0, panY));
+      }
       this._viewScale = scale;
       this._viewPanX = panX;
       this._viewPanY = panY;
@@ -831,6 +837,9 @@
         this._activePointerId = null;
       }
       if (this._undoIdx >= 0) this._restoreUndo();
+      if (this.onDrawEvent) {
+        this.onDrawEvent({ type: "stroke-cancel" });
+      }
     }
     /* ── Load an image onto the canvas ── */
     loadImage(dataUrl) {
@@ -937,6 +946,10 @@
         case "stroke-end":
           this._remoteLast = null;
           this.pushUndo();
+          break;
+        case "stroke-cancel":
+          this._remoteLast = null;
+          if (this._undoIdx >= 0) this._restoreUndo();
           break;
         case "clear":
           this.clear();
@@ -5356,11 +5369,14 @@
     const currMidX = (curr[0].x + curr[1].x) / 2;
     const currMidY = (curr[0].y + curr[1].y) / 2;
     const ds = prevDist > 0 ? currDist / prevDist : 1;
-    const newScale = Math.max(0.5, Math.min(5, viewScale * ds));
+    const newScale = viewScale * ds;
     viewPanX = currMidX - (prevMidX - viewPanX) * (newScale / viewScale);
     viewPanY = currMidY - (prevMidY - viewPanY) * (newScale / viewScale);
     viewScale = newScale;
     engine.setViewTransform(viewScale, viewPanX, viewPanY);
+    viewScale = engine._viewScale;
+    viewPanX = engine._viewPanX;
+    viewPanY = engine._viewPanY;
     lastTouches = curr;
   }, { passive: false });
   container.addEventListener("touchend", (e) => {

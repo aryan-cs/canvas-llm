@@ -190,7 +190,7 @@ container.addEventListener('touchmove', (e) => {
 
   // Scale change
   const ds = prevDist > 0 ? currDist / prevDist : 1;
-  const newScale = Math.max(0.5, Math.min(5, viewScale * ds));
+  const newScale = viewScale * ds;
 
   // Zoom around the midpoint + pan with midpoint movement
   viewPanX = currMidX - (prevMidX - viewPanX) * (newScale / viewScale);
@@ -198,6 +198,10 @@ container.addEventListener('touchmove', (e) => {
   viewScale = newScale;
 
   engine.setViewTransform(viewScale, viewPanX, viewPanY);
+  // Read back clamped values
+  viewScale = engine._viewScale;
+  viewPanX = engine._viewPanX;
+  viewPanY = engine._viewPanY;
   lastTouches = curr;
 }, { passive: false });
 

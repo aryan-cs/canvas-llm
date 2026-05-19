@@ -155,6 +155,14 @@ export class DrawingEngine {
 
   /* ── View transform (zoom / pan) ── */
   setViewTransform(scale, panX, panY) {
+    // Clamp: no zoom-out past 1x, max 5x
+    scale = Math.max(1, Math.min(5, scale));
+    // Clamp pan so canvas edges stay within viewport
+    const r = this.container.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      panX = Math.max(r.width * (1 - scale), Math.min(0, panX));
+      panY = Math.max(r.height * (1 - scale), Math.min(0, panY));
+    }
     this._viewScale = scale;
     this._viewPanX = panX;
     this._viewPanY = panY;
@@ -192,6 +200,10 @@ export class DrawingEngine {
       this._activePointerId = null;
     }
     if (this._undoIdx >= 0) this._restoreUndo();
+    // Tell the remote side to undo the partial stroke it received
+    if (this.onDrawEvent) {
+      this.onDrawEvent({ type: 'stroke-cancel' });
+    }
   }
 
   /* ── Load an image onto the canvas ── */
@@ -306,6 +318,11 @@ export class DrawingEngine {
       case 'stroke-end':
         this._remoteLast = null;
         this.pushUndo();
+        break;
+      case 'stroke-cancel':
+        // Remote cancelled a partial stroke (e.g. pinch gesture interrupted it)
+        this._remoteLast = null;
+        if (this._undoIdx >= 0) this._restoreUndo();
         break;
       case 'clear':
         this.clear();
