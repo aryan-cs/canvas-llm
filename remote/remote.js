@@ -345,21 +345,44 @@ async function connectToPeer() {
   }
 }
 
-/* ── Send = capture remote's current viewport, ship blob to host for paste ── */
-sendBtn.onclick = async () => {
+/* ── Send: single tap pastes, double tap pastes + submits the chat ── */
+async function doSend(submit) {
   if (!peer || peer.getState() !== 'connected') return;
   sendBtn.disabled = true;
-  showToast('Sending...', '');
+  showToast(submit ? 'Sending to chat...' : 'Pasting...', '');
   try {
     const blob = await engine.toBlob();
     if (!blob) throw new Error('Failed to capture canvas');
-    await peer.sendImage(blob);
-    // onAck / onPasteAck callbacks re-enable the button.
+    await peer.sendImage(blob, { submit });
+    // onAck callback re-enables the button and shows success/failure.
   } catch (e) {
     showToast('Failed: ' + (e.message || 'send error'), 'error');
     sendBtn.disabled = false;
   }
-};
+}
+
+let _sendClickTimer = null;
+let _sendFirstClick = 0;
+const DOUBLE_TAP_MS = 350;
+
+sendBtn.addEventListener('click', () => {
+  if (sendBtn.disabled) return;
+  const now = Date.now();
+  if (_sendClickTimer && (now - _sendFirstClick) < DOUBLE_TAP_MS) {
+    // Second tap within window — double-tap: paste + submit
+    clearTimeout(_sendClickTimer);
+    _sendClickTimer = null;
+    doSend(true);
+  } else {
+    // First tap — schedule single-tap action after the window
+    _sendFirstClick = now;
+    if (_sendClickTimer) clearTimeout(_sendClickTimer);
+    _sendClickTimer = setTimeout(() => {
+      _sendClickTimer = null;
+      doSend(false);
+    }, DOUBLE_TAP_MS);
+  }
+});
 
 /* ── Init ── */
 requestAnimationFrame(() => {

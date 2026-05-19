@@ -5185,13 +5185,13 @@
       }
       this._conn.send({ type: "paste" });
     }
-    async sendImage(blob) {
+    async sendImage(blob, opts = {}) {
       if (!this._conn || this._conn.open === false) {
         throw new Error("Not connected");
       }
       this._setState("sending");
       const buf = await blob.arrayBuffer();
-      this._conn.send({ type: "image", data: buf });
+      this._conn.send({ type: "image", data: buf, submit: !!opts.submit });
       this._setState("connected");
     }
     disconnect() {
@@ -5514,19 +5514,38 @@
       errorOverlay.classList.remove("hidden");
     }
   }
-  sendBtn.onclick = async () => {
+  async function doSend(submit) {
     if (!peer || peer.getState() !== "connected") return;
     sendBtn.disabled = true;
-    showToast("Sending...", "");
+    showToast(submit ? "Sending to chat..." : "Pasting...", "");
     try {
       const blob = await engine.toBlob();
       if (!blob) throw new Error("Failed to capture canvas");
-      await peer.sendImage(blob);
+      await peer.sendImage(blob, { submit });
     } catch (e) {
       showToast("Failed: " + (e.message || "send error"), "error");
       sendBtn.disabled = false;
     }
-  };
+  }
+  var _sendClickTimer = null;
+  var _sendFirstClick = 0;
+  var DOUBLE_TAP_MS = 350;
+  sendBtn.addEventListener("click", () => {
+    if (sendBtn.disabled) return;
+    const now = Date.now();
+    if (_sendClickTimer && now - _sendFirstClick < DOUBLE_TAP_MS) {
+      clearTimeout(_sendClickTimer);
+      _sendClickTimer = null;
+      doSend(true);
+    } else {
+      _sendFirstClick = now;
+      if (_sendClickTimer) clearTimeout(_sendClickTimer);
+      _sendClickTimer = setTimeout(() => {
+        _sendClickTimer = null;
+        doSend(false);
+      }, DOUBLE_TAP_MS);
+    }
+  });
   requestAnimationFrame(() => {
     engine.resize();
     engine.pushUndo();

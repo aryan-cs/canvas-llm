@@ -119,13 +119,13 @@ export class PeerRemote {
     this._conn.send({ type: 'paste' });
   }
 
-  async sendImage(blob) {
+  async sendImage(blob, opts = {}) {
     if (!this._conn || this._conn.open === false) {
       throw new Error('Not connected');
     }
     this._setState('sending');
     const buf = await blob.arrayBuffer();
-    this._conn.send({ type: 'image', data: buf });
+    this._conn.send({ type: 'image', data: buf, submit: !!opts.submit });
     this._setState('connected');
   }
 

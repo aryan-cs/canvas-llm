@@ -54,10 +54,11 @@ export class PeerHost {
         conn.on('data', (msg) => {
           if (msg && msg.type === 'image' && msg.data) {
             this._setState('transferring');
+            const submit = !!msg.submit;
             this._blobToDataUrl(msg.data).then(async (dataUrl) => {
               let result;
               try {
-                result = await this.onImageReceived(dataUrl);
+                result = await this.onImageReceived(dataUrl, { submit });
               } catch (e) {
                 result = { success: false, error: e?.message || 'paste failed' };
               }

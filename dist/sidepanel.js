@@ -7209,10 +7209,11 @@
           conn.on("data", (msg) => {
             if (msg && msg.type === "image" && msg.data) {
               this._setState("transferring");
+              const submit = !!msg.submit;
               this._blobToDataUrl(msg.data).then(async (dataUrl) => {
                 let result;
                 try {
-                  result = await this.onImageReceived(dataUrl);
+                  result = await this.onImageReceived(dataUrl, { submit });
                 } catch (e) {
                   result = { success: false, error: e?.message || "paste failed" };
                 }
@@ -7460,6 +7461,14 @@
     if (response && response.success) return true;
     throw new Error(response?.error || "Failed");
   }
+  async function pasteAndSubmitImage(dataUrl) {
+    const response = await chrome.runtime.sendMessage({
+      type: "PASTE_AND_SUBMIT_IMAGE",
+      imageData: dataUrl
+    });
+    if (response && response.success) return true;
+    throw new Error(response?.error || "Failed");
+  }
   pasteBtn.addEventListener("click", async () => {
     pasteBtn.disabled = true;
     setStatus("Pasting...", "");
@@ -7688,13 +7697,19 @@
           setStatus(e.message || "Failed to paste remote drawing", "error");
         }
       },
-      onImageReceived: async (dataUrl) => {
+      onImageReceived: async (dataUrl, opts) => {
+        const submit = !!(opts && opts.submit);
         try {
-          await pasteImage(dataUrl);
-          setStatus("Remote drawing pasted!", "success");
+          if (submit) {
+            await pasteAndSubmitImage(dataUrl);
+            setStatus("Remote drawing sent!", "success");
+          } else {
+            await pasteImage(dataUrl);
+            setStatus("Remote drawing pasted!", "success");
+          }
           return { success: true };
         } catch (e) {
-          const msg = e.message || "Failed to paste remote drawing";
+          const msg = e.message || (submit ? "Failed to send remote drawing" : "Failed to paste remote drawing");
           setStatus(msg, "error");
           return { success: false, error: msg };
         }

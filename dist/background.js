@@ -5,11 +5,15 @@
   });
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "PASTE_IMAGE") {
-      relayPaste(msg.imageData).then((res) => sendResponse(res)).catch((e) => sendResponse({ success: false, error: e.message }));
+      relayPaste(msg.imageData, false).then((res) => sendResponse(res)).catch((e) => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+    if (msg.type === "PASTE_AND_SUBMIT_IMAGE") {
+      relayPaste(msg.imageData, true).then((res) => sendResponse(res)).catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
     }
   });
-  async function relayPaste(imageData) {
+  async function relayPaste(imageData, submit) {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tabs || !tabs[0]) throw new Error("No active tab found");
     const tabId = tabs[0].id;
@@ -17,14 +21,14 @@
       target: { tabId },
       world: "MAIN",
       func: pasteImageInPage,
-      args: [imageData]
+      args: [imageData, !!submit]
     });
     const result = results?.[0]?.result;
     if (!result) throw new Error("Script execution returned no result");
     if (result.error) throw new Error(result.error);
     return { success: true };
   }
-  async function pasteImageInPage(imageDataUrl) {
+  async function pasteImageInPage(imageDataUrl, submit) {
     try {
       const parts = imageDataUrl.split(",");
       const mime = parts[0].match(/:(.*?);/)[1];
@@ -35,16 +39,59 @@
       const fileNum = Date.now() % 1e5;
       const file = new File([blob], "drawing-" + fileNum + ".png", { type: "image/png" });
       const host = window.location.hostname;
+      let pasteResult;
       if (host === "gemini.google.com") {
-        return geminiPaste(file);
+        pasteResult = geminiPaste(file);
       } else if (host === "claude.ai") {
-        return claudePaste(file);
+        pasteResult = claudePaste(file);
       } else if (host === "chatgpt.com" || host === "chat.openai.com") {
-        return chatgptPaste(file);
+        pasteResult = chatgptPaste(file);
+      } else {
+        return { error: "Unsupported site: " + host };
       }
-      return { error: "Unsupported site: " + host };
+      if (pasteResult.error) return pasteResult;
+      if (!submit) return pasteResult;
+      const getSendBtn = sendBtnFinder(host);
+      const btn = await waitForEnabled(getSendBtn, 2e4);
+      btn.click();
+      return { success: true };
     } catch (e) {
       return { error: e.message || "Paste failed" };
+    }
+    function sendBtnFinder(host) {
+      if (host === "claude.ai") {
+        return () => document.querySelector('button[aria-label="Send message"]') || document.querySelector('button[aria-label="Send Message"]');
+      }
+      if (host === "chatgpt.com" || host === "chat.openai.com") {
+        return () => document.querySelector("#composer-submit-button") || document.querySelector('button[data-testid="send-button"]') || document.querySelector('button[aria-label*="Send" i]');
+      }
+      if (host === "gemini.google.com") {
+        return () => document.querySelector("button.send-button") || document.querySelector('button[aria-label*="Send" i]');
+      }
+      return () => null;
+    }
+    function isEnabled(btn) {
+      if (!btn) return false;
+      if (btn.disabled) return false;
+      if (btn.getAttribute("aria-disabled") === "true") return false;
+      return true;
+    }
+    function waitForEnabled(getBtn, maxMs) {
+      return new Promise((resolve, reject) => {
+        const start = Date.now();
+        setTimeout(function poll() {
+          const btn = getBtn();
+          if (isEnabled(btn)) {
+            resolve(btn);
+            return;
+          }
+          if (Date.now() - start > maxMs) {
+            reject(new Error("Image upload timed out \u2014 send button never enabled"));
+            return;
+          }
+          setTimeout(poll, 100);
+        }, 250);
+      });
     }
     function geminiPaste(file) {
       const editor = document.querySelector('.ql-editor[contenteditable="true"]') || document.querySelector('div[contenteditable="true"][role="textbox"]') || document.querySelector('[contenteditable="true"]');

@@ -144,6 +144,15 @@ async function pasteImage(dataUrl) {
   throw new Error(response?.error || 'Failed');
 }
 
+async function pasteAndSubmitImage(dataUrl) {
+  const response = await chrome.runtime.sendMessage({
+    type: 'PASTE_AND_SUBMIT_IMAGE',
+    imageData: dataUrl,
+  });
+  if (response && response.success) return true;
+  throw new Error(response?.error || 'Failed');
+}
+
 pasteBtn.addEventListener('click', async () => {
   pasteBtn.disabled = true;
   setStatus('Pasting...', '');
@@ -392,13 +401,19 @@ async function startSharing() {
         setStatus(e.message || 'Failed to paste remote drawing', 'error');
       }
     },
-    onImageReceived: async (dataUrl) => {
+    onImageReceived: async (dataUrl, opts) => {
+      const submit = !!(opts && opts.submit);
       try {
-        await pasteImage(dataUrl);
-        setStatus('Remote drawing pasted!', 'success');
+        if (submit) {
+          await pasteAndSubmitImage(dataUrl);
+          setStatus('Remote drawing sent!', 'success');
+        } else {
+          await pasteImage(dataUrl);
+          setStatus('Remote drawing pasted!', 'success');
+        }
         return { success: true };
       } catch (e) {
-        const msg = e.message || 'Failed to paste remote drawing';
+        const msg = e.message || (submit ? 'Failed to send remote drawing' : 'Failed to paste remote drawing');
         setStatus(msg, 'error');
         return { success: false, error: msg };
       }
