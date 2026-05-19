@@ -12,6 +12,8 @@ export class DrawingEngine {
     this.brushSize = 3;
     this.background = opts.background || '#ffffff';
     this.gridOverlay = opts.gridOverlay || null;
+    this._gridSize = 50;
+    this._gridOn = false;
     this.onHistoryChange = opts.onHistoryChange || (() => {});
     this.onDrawEvent = opts.onDrawEvent || null;
 
@@ -42,6 +44,24 @@ export class DrawingEngine {
   setTool(t) { this.tool = t; }
   setColor(c) { this.color = c; }
   setBrushSize(s) { this.brushSize = s; }
+
+  /* ── Grid ── */
+  setGrid(on, size) {
+    this._gridOn = on;
+    if (size !== undefined) this._gridSize = size;
+    if (!this.gridOverlay) return;
+    if (!on) {
+      this.gridOverlay.style.display = 'none';
+      return;
+    }
+    this.gridOverlay.style.display = 'block';
+    this._updateGridTransform();
+  }
+
+  setGridSize(size) {
+    this._gridSize = size;
+    if (this._gridOn) this._updateGridTransform();
+  }
 
   /* ── Resize (retina-aware, preserves content) ── */
   resize() {
@@ -138,17 +158,27 @@ export class DrawingEngine {
     this._viewScale = scale;
     this._viewPanX = panX;
     this._viewPanY = panY;
-    const t = `translate(${panX}px, ${panY}px) scale(${scale})`;
     this.canvas.style.transformOrigin = '0 0';
-    this.canvas.style.transform = t;
-    if (this.gridOverlay) {
-      this.gridOverlay.style.transformOrigin = '0 0';
-      this.gridOverlay.style.transform = t;
-    }
+    this.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    this._updateGridTransform();
   }
 
   resetView() {
     this.setViewTransform(1, 0, 0);
+  }
+
+  _updateGridTransform() {
+    if (!this.gridOverlay || this.gridOverlay.style.display === 'none') return;
+    // Keep grid as infinite repeating pattern — adjust size and offset to match zoom/pan
+    const size = this._gridSize * this._viewScale;
+    const c = this.background === '#000000' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    this.gridOverlay.style.backgroundImage =
+      `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`;
+    this.gridOverlay.style.backgroundSize = `${size}px ${size}px`;
+    this.gridOverlay.style.backgroundPosition =
+      `${this._viewPanX % size}px ${this._viewPanY % size}px`;
+    // No CSS transform on grid — it stays full-size and infinite
+    this.gridOverlay.style.transform = '';
   }
 
   cancelStroke() {
@@ -182,9 +212,38 @@ export class DrawingEngine {
     });
   }
 
-  /* ── Export ── */
-  toDataURL() { return this.canvas.toDataURL('image/png'); }
-  toBlob() { return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png')); }
+  /* ── Export (captures current viewport when zoomed/panned) ── */
+  toDataURL() {
+    if (this._viewScale === 1 && this._viewPanX === 0 && this._viewPanY === 0) {
+      return this.canvas.toDataURL('image/png');
+    }
+    return this._exportView().toDataURL('image/png');
+  }
+
+  toBlob() {
+    if (this._viewScale === 1 && this._viewPanX === 0 && this._viewPanY === 0) {
+      return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png'));
+    }
+    return new Promise(resolve => this._exportView().toBlob(resolve, 'image/png'));
+  }
+
+  _exportView() {
+    const dpr = devicePixelRatio || 1;
+    const r = this.container.getBoundingClientRect();
+    const tmp = document.createElement('canvas');
+    tmp.width = r.width * dpr;
+    tmp.height = r.height * dpr;
+    const ctx = tmp.getContext('2d');
+    ctx.scale(dpr, dpr);
+    // Fill background
+    ctx.fillStyle = this.background;
+    ctx.fillRect(0, 0, r.width, r.height);
+    // Draw source canvas with current view transform
+    ctx.translate(this._viewPanX, this._viewPanY);
+    ctx.scale(this._viewScale, this._viewScale);
+    ctx.drawImage(this.canvas, 0, 0, r.width, r.height);
+    return tmp;
+  }
 
   /* ── Remote stroke replay ── */
   remoteStroke(event) {

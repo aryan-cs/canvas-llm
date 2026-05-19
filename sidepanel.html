@@ -216,14 +216,13 @@
     }
     /* ── Connection dot ── */
     .dot {
-      width: 0; height: 0;
+      display: none;
+      width: 8px; height: 8px;
       border-radius: 50%;
-      background: transparent;
       flex-shrink: 0;
-      transition: background .3s, width .2s, height .2s;
     }
-    .dot.waiting { width: 8px; height: 8px; background: #f59e0b; }
-    .dot.connected { width: 8px; height: 8px; background: #22c55e; }
+    .dot.waiting { display: block; background: #f59e0b; }
+    .dot.connected { display: block; background: #22c55e; }
 
     /* ── Settings divider ── */
     .setting-divider {

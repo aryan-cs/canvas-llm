@@ -225,15 +225,7 @@ gridSizeSlider.addEventListener('input', (e) => {
 });
 
 function updateGrid() {
-  if (gridOn) {
-    const c = engine.background === '#000000' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
-    gridOverlay.style.backgroundImage =
-      `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`;
-    gridOverlay.style.backgroundSize = `${gridSize}px ${gridSize}px`;
-    gridOverlay.style.display = 'block';
-  } else {
-    gridOverlay.style.display = 'none';
-  }
+  engine.setGrid(gridOn, gridSize);
 }
 
 /* ── Share / Remote Drawing (PeerJS) — inside settings ── */
