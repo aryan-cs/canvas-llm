@@ -812,7 +812,7 @@
       this._updateGridTransform();
     }
     /* Grow the canvas backing store so the full visible area is drawable.
-       Adds a buffer (50% of container) so we don't re-expand on every wheel tick. */
+       Adds a 100% buffer so we don't re-expand on every wheel tick. */
     _expandCanvasForView() {
       const r = this.container.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return;
@@ -828,8 +828,8 @@
       const expandRight = Math.max(0, visRight - curW);
       const expandBottom = Math.max(0, visBottom - curH);
       if (expandLeft < 1 && expandTop < 1 && expandRight < 1 && expandBottom < 1) return;
-      const bufW = r.width * 0.5 / this._viewScale;
-      const bufH = r.height * 0.5 / this._viewScale;
+      const bufW = r.width / this._viewScale;
+      const bufH = r.height / this._viewScale;
       const totalLeft = Math.ceil(expandLeft + (expandLeft > 0 ? bufW : 0));
       const totalTop = Math.ceil(expandTop + (expandTop > 0 ? bufH : 0));
       const totalRight = Math.ceil(expandRight + (expandRight > 0 ? bufW : 0));
@@ -853,25 +853,9 @@
       this.ctx.setTransform(1, 0, 0, 1, 0, 0);
       this.ctx.drawImage(old, offX * dpr, offY * dpr);
       this.ctx.restore();
-      const newStack = [];
-      for (const snap of this._undoStack) {
-        const tmpC = document.createElement("canvas");
-        tmpC.width = newW * dpr;
-        tmpC.height = newH * dpr;
-        const tmpCtx = tmpC.getContext("2d");
-        tmpCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        tmpCtx.fillStyle = this.background;
-        tmpCtx.fillRect(0, 0, newW, newH);
-        tmpCtx.setTransform(1, 0, 0, 1, 0, 0);
-        tmpCtx.putImageData(snap, offX * dpr, offY * dpr);
-        newStack.push(tmpCtx.getImageData(0, 0, newW * dpr, newH * dpr));
-      }
-      this._undoStack = newStack;
-      if (this._undoIdx >= this._undoStack.length) this._undoIdx = this._undoStack.length - 1;
-      this._undoStack = this._undoStack.slice(0, this._undoIdx + 1);
-      this._undoStack.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height));
-      if (this._undoStack.length > MAX_HISTORY) this._undoStack.shift();
-      this._undoIdx = this._undoStack.length - 1;
+      this._undoStack = [];
+      this._undoIdx = -1;
+      this.pushUndo();
       if (offX > 0 || offY > 0) {
         this._viewPanX += offX * this._viewScale;
         this._viewPanY += offY * this._viewScale;
@@ -917,7 +901,13 @@
           const { ctx, canvas: canvas2 } = this;
           ctx.save();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.drawImage(img, 0, 0, canvas2.width, canvas2.height);
+          const dpr = devicePixelRatio || 1;
+          const cw = canvas2.width;
+          const scale = cw / img.width;
+          const dh = img.height * scale;
+          ctx.fillStyle = this.background;
+          ctx.fillRect(0, 0, canvas2.width, canvas2.height);
+          ctx.drawImage(img, 0, 0, cw, dh);
           ctx.restore();
           this.pushUndo();
           resolve();
@@ -963,7 +953,7 @@
       switch (event.type) {
         case "stroke-start": {
           const x = event.nx * r.width;
-          const y = event.ny * r.height;
+          const y = event.ny * r.width;
           const prevOp = ctx.globalCompositeOperation;
           const prevStroke = ctx.strokeStyle;
           const prevWidth = ctx.lineWidth;
@@ -989,7 +979,7 @@
         case "stroke-move": {
           if (!this._remoteLast) break;
           const x = event.nx * r.width;
-          const y = event.ny * r.height;
+          const y = event.ny * r.width;
           const prevOp = ctx.globalCompositeOperation;
           const prevStroke = ctx.strokeStyle;
           const prevWidth = ctx.lineWidth;
@@ -1059,7 +1049,7 @@
         this._pendingStrokeStart = {
           type: "stroke-start",
           nx: p.x / r.width,
-          ny: p.y / r.height,
+          ny: p.y / r.width,
           tool: this.tool,
           color: this.color,
           brushSize: this.brushSize
@@ -1088,7 +1078,7 @@
           this.onDrawEvent({
             type: "stroke-move",
             nx: p.x / r.width,
-            ny: p.y / r.height
+            ny: p.y / r.width
           });
         }
       }
@@ -5435,7 +5425,7 @@
     if (_suppressViewSync) return;
     if (peer && peer.getState() === "connected") {
       const r = container.getBoundingClientRect();
-      peer.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+      peer.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.width });
     }
   }
   function getTouchData(touches) {
@@ -5576,7 +5566,7 @@
         const r = container.getBoundingClientRect();
         viewScale = view.scale;
         viewPanX = view.npx * r.width;
-        viewPanY = view.npy * r.height;
+        viewPanY = view.npy * r.width;
         engine.setViewTransform(viewScale, viewPanX, viewPanY);
         viewScale = engine._viewScale;
         viewPanX = engine._viewPanX;

@@ -91,7 +91,7 @@ function sendViewToRemote() {
   if (_suppressViewSync) return;
   if (peerHost && peerHost.getState() === 'connected') {
     const r = container.getBoundingClientRect();
-    peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+    peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.width });
   }
 }
 
@@ -318,7 +318,7 @@ async function startSharing() {
       const r = container.getBoundingClientRect();
       viewScale = view.scale;
       viewPanX = view.npx * r.width;
-      viewPanY = view.npy * r.height;
+      viewPanY = view.npy * r.width;
       engine.setViewTransform(viewScale, viewPanX, viewPanY);
       viewScale = engine._viewScale;
       viewPanX = engine._viewPanX;
@@ -349,7 +349,7 @@ async function startSharing() {
       peerHost.sendInit(engine.toDataURL(), settings);
       // Also sync current view
       const r = container.getBoundingClientRect();
-      peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.height });
+      peerHost.sendView({ scale: viewScale, npx: viewPanX / r.width, npy: viewPanY / r.width });
     },
     onPasteRequest: async () => {
       try {
